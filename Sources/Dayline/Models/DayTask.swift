@@ -1,6 +1,8 @@
 import Foundation
 
 struct DayTask: Identifiable, Codable, Equatable {
+    static let maximumTitleLength = 200
+
     var id: UUID
     var title: String
     var start: Date

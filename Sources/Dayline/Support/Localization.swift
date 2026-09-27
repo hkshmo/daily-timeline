@@ -19,6 +19,12 @@ struct L10n {
     var emptyDescription: String { ru ? "Добавьте первый блок на временную линию" : "Add your first block to the timeline" }
     var quit: String { ru ? "Завершить Dayline" : "Quit Dayline" }
     var developer: String { ru ? "Разработчик" : "Developer" }
+    var storageErrorTitle: String { ru ? "Ошибка хранения данных" : "Storage error" }
+    var storageErrorMessage: String {
+        ru
+            ? "Dayline сохранил исходные данные, когда это было возможно. Проверьте подробности ниже."
+            : "Dayline preserved the original data when possible. Review the details below."
+    }
     var edit: String { ru ? "Изменить" : "Edit" }
     var delete: String { ru ? "Удалить" : "Delete" }
     var newBlock: String { ru ? "Новый блок" : "New block" }

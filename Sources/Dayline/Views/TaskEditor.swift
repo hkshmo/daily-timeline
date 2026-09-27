@@ -58,6 +58,11 @@ struct TaskEditor: View {
                 .font(.title2.bold())
             TextField(l10n.title, text: $title)
                 .textFieldStyle(.roundedBorder)
+                .onChange(of: title) { _, value in
+                    if value.count > DayTask.maximumTitleLength {
+                        title = String(value.prefix(DayTask.maximumTitleLength))
+                    }
+                }
             Picker(l10n.repeatMode, selection: $repeatOption) {
                 Text(l10n.todayOnly).tag(TaskRepeatOption.once)
                 Text(l10n.everyDay).tag(TaskRepeatOption.daily)
@@ -127,7 +132,8 @@ struct TaskEditor: View {
                         ? resultStart.addingTimeInterval(TimeInterval(durationMinutes * 60))
                         : end
                     let result = DayTask(
-                        id: task?.id ?? UUID(), title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                        id: task?.id ?? UUID(),
+                        title: String(title.trimmingCharacters(in: .whitespacesAndNewlines).prefix(DayTask.maximumTitleLength)),
                         start: resultStart, end: resultEnd, color: color,
                         isCompleted: task?.isCompleted ?? false,
                         startedAt: task?.startedAt,

@@ -77,6 +77,18 @@ struct DaylineView: View {
                 timelineEndHour: $timelineEndHour
             )
         }
+        .alert(l10n.storageErrorTitle, isPresented: storageErrorPresented) {
+            Button(l10n.done) { store.clearStorageError() }
+        } message: {
+            Text("\(l10n.storageErrorMessage)\n\n\(store.storageError ?? "")")
+        }
+    }
+
+    private var storageErrorPresented: Binding<Bool> {
+        Binding(
+            get: { store.storageError != nil },
+            set: { if !$0 { store.clearStorageError() } }
+        )
     }
 
     private var header: some View {

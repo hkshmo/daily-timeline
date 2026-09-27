@@ -75,4 +75,65 @@ final class TaskStoreTests: XCTestCase {
         XCTAssertEqual(postponed?.end, task.end)
         XCTAssertNil(postponed?.startedAt)
     }
+
+    func testStorageUsesPrivatePermissionsAndCreatesBackup() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let url = directory.appendingPathComponent("tasks.json")
+        let first = DayTask(title: "First", start: Date(), end: Date().addingTimeInterval(3600))
+        let second = DayTask(title: "Second", start: Date(), end: Date().addingTimeInterval(3600))
+
+        let firstStore = TaskStore(fileURL: url)
+        firstStore.add(first)
+        let secondStore = TaskStore(fileURL: url)
+        secondStore.add(second)
+
+        let directoryPermissions = try XCTUnwrap(
+            FileManager.default.attributesOfItem(atPath: directory.path)[.posixPermissions] as? NSNumber
+        )
+        let filePermissions = try XCTUnwrap(
+            FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
+        )
+        XCTAssertEqual(directoryPermissions.intValue & 0o777, 0o700)
+        XCTAssertEqual(filePermissions.intValue & 0o777, 0o600)
+
+        let backups = try FileManager.default.contentsOfDirectory(
+            at: directory.appendingPathComponent("Backups"),
+            includingPropertiesForKeys: nil
+        )
+        XCTAssertEqual(backups.count, 1)
+        let backupTasks = try JSONDecoder().decode([DayTask].self, from: Data(contentsOf: backups[0]))
+        XCTAssertEqual(backupTasks, [first])
+    }
+
+    func testCorruptedStorageIsPreservedAndReported() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let url = directory.appendingPathComponent("tasks.json")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("not-json".utf8).write(to: url)
+
+        let store = TaskStore(fileURL: url)
+
+        XCTAssertTrue(store.tasks.isEmpty)
+        XCTAssertNotNil(store.storageError)
+        let backups = try FileManager.default.contentsOfDirectory(
+            at: directory.appendingPathComponent("Backups"),
+            includingPropertiesForKeys: nil
+        )
+        XCTAssertEqual(backups.count, 1)
+        XCTAssertEqual(try Data(contentsOf: backups[0]), Data("not-json".utf8))
+    }
+
+    func testTaskTitleIsLimitedBeforePersistence() {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("tasks.json")
+        let store = TaskStore(fileURL: url)
+        let task = DayTask(
+            title: String(repeating: "a", count: DayTask.maximumTitleLength + 50),
+            start: Date(),
+            end: Date().addingTimeInterval(3600)
+        )
+
+        store.add(task)
+
+        XCTAssertEqual(store.tasks.first?.title.count, DayTask.maximumTitleLength)
+    }
 }

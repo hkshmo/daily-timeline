@@ -5,9 +5,14 @@ import Combine
 final class TaskStore: ObservableObject {
     @Published private(set) var tasks: [DayTask] = []
     @Published var selectedDate = Date()
+    @Published private(set) var storageError: String?
 
     private let calendar: Calendar
     private let fileURL: URL
+    private var didCreateSessionBackup = false
+
+    private static let maximumStorageBytes = 20 * 1024 * 1024
+    private static let maximumTaskCount = 50_000
 
     init(calendar: Calendar = .current, fileURL: URL? = nil) {
         self.calendar = calendar
@@ -27,6 +32,7 @@ final class TaskStore: ObservableObject {
     }
 
     func add(_ task: DayTask, repeatWeekdays: Set<Int>? = nil) {
+        let task = normalized(task)
         if let repeatWeekdays {
             tasks.append(contentsOf: makeSeries(from: task, weekdays: repeatWeekdays))
         } else {
@@ -41,6 +47,7 @@ final class TaskStore: ObservableObject {
     }
 
     func update(_ task: DayTask, repeatWeekdays: Set<Int>?) {
+        let task = normalized(task)
         guard let oldTask = tasks.first(where: { $0.id == task.id }) else { return }
 
         if let repeatWeekdays {
@@ -153,10 +160,36 @@ final class TaskStore: ObservableObject {
         }
     }
 
+    func clearStorageError() {
+        storageError = nil
+    }
+
     private func load() {
-        guard let data = try? Data(contentsOf: fileURL),
-              let decoded = try? JSONDecoder().decode([DayTask].self, from: data) else { return }
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+
+        let decoded: [DayTask]
+        do {
+            let values = try fileURL.resourceValues(forKeys: [.fileSizeKey])
+            let fileSize = values.fileSize ?? 0
+            guard fileSize <= Self.maximumStorageBytes else {
+                throw StorageError.fileTooLarge(fileSize)
+            }
+            let data = try Data(contentsOf: fileURL, options: .mappedIfSafe)
+            decoded = try JSONDecoder().decode([DayTask].self, from: data)
+            guard decoded.count <= Self.maximumTaskCount else {
+                throw StorageError.tooManyTasks(decoded.count)
+            }
+        } catch {
+            let backupResult = preserveCurrentFile(prefix: "tasks-corrupt")
+            storageError = [
+                "Не удалось прочитать файл задач: \(error.localizedDescription)",
+                backupResult
+            ].compactMap { $0 }.joined(separator: "\n")
+            return
+        }
+
         tasks = decoded
+        secureExistingStorage()
         var changed = false
         for index in tasks.indices where tasks[index].seriesID != nil && tasks[index].repeatWeekdays == nil {
             tasks[index].repeatWeekdays = Array(1...7)
@@ -169,12 +202,82 @@ final class TaskStore: ObservableObject {
     private func persist() {
         do {
             let directory = fileURL.deletingLastPathComponent()
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try createSecureDirectory(at: directory)
+            try createSessionBackupIfNeeded()
+            guard tasks.count <= Self.maximumTaskCount else {
+                throw StorageError.tooManyTasks(tasks.count)
+            }
             let data = try JSONEncoder().encode(tasks)
+            guard data.count <= Self.maximumStorageBytes else {
+                throw StorageError.fileTooLarge(data.count)
+            }
             try data.write(to: fileURL, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+            storageError = nil
         } catch {
-            assertionFailure("Failed to save tasks: \(error)")
+            storageError = "Не удалось сохранить задачи: \(error.localizedDescription)"
         }
+    }
+
+    private func normalized(_ task: DayTask) -> DayTask {
+        var result = task
+        result.title = String(
+            task.title
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .prefix(DayTask.maximumTitleLength)
+        )
+        return result
+    }
+
+    private func createSecureDirectory(at url: URL) throws {
+        try FileManager.default.createDirectory(
+            at: url,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
+    }
+
+    private func secureExistingStorage() {
+        do {
+            try createSecureDirectory(at: fileURL.deletingLastPathComponent())
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+        } catch {
+            storageError = "Не удалось применить безопасные права доступа: \(error.localizedDescription)"
+        }
+    }
+
+    private func createSessionBackupIfNeeded() throws {
+        guard !didCreateSessionBackup,
+              FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        let backupsDirectory = fileURL.deletingLastPathComponent().appendingPathComponent("Backups", isDirectory: true)
+        try createSecureDirectory(at: backupsDirectory)
+        let backupURL = backupsDirectory.appendingPathComponent("tasks-\(Self.backupTimestamp()).json")
+        try FileManager.default.copyItem(at: fileURL, to: backupURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: backupURL.path)
+        didCreateSessionBackup = true
+    }
+
+    @discardableResult
+    private func preserveCurrentFile(prefix: String) -> String? {
+        do {
+            let backupsDirectory = fileURL.deletingLastPathComponent().appendingPathComponent("Backups", isDirectory: true)
+            try createSecureDirectory(at: backupsDirectory)
+            let backupURL = backupsDirectory.appendingPathComponent("\(prefix)-\(Self.backupTimestamp()).json")
+            try FileManager.default.copyItem(at: fileURL, to: backupURL)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: backupURL.path)
+            didCreateSessionBackup = true
+            return "Исходный файл сохранён: \(backupURL.path)"
+        } catch {
+            return "Не удалось создать резервную копию: \(error.localizedDescription)"
+        }
+    }
+
+    private static func backupTimestamp() -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss-SSS"
+        return formatter.string(from: Date())
     }
 
     private func makeSeries(from task: DayTask, weekdays: Set<Int>, seriesID: UUID = UUID()) -> [DayTask] {
@@ -249,4 +352,18 @@ final class TaskStore: ObservableObject {
         formatter.dateFormat = "HH:mm"
         return formatter
     }()
+}
+
+private enum StorageError: LocalizedError {
+    case fileTooLarge(Int)
+    case tooManyTasks(Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .fileTooLarge(let bytes):
+            return "Файл слишком большой (\(bytes) байт)"
+        case .tooManyTasks(let count):
+            return "Слишком много задач (\(count))"
+        }
+    }
 }
