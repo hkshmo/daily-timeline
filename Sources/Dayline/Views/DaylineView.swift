@@ -97,6 +97,15 @@ struct DaylineView: View {
                 Text("Dayline")
                     .font(.title2.bold())
                 Spacer()
+                Button { Task { await store.synchronizeNow() } } label: {
+                    if store.isSyncing {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: store.syncError == nil ? "icloud" : "icloud.slash")
+                    }
+                }
+                .buttonStyle(IconBlockButtonStyle())
+                .help(store.syncError ?? "iCloud")
                 Button { showingSettings = true } label: {
                     Image(systemName: "gearshape")
                 }

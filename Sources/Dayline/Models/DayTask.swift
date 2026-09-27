@@ -1,6 +1,6 @@
 import Foundation
 
-struct DayTask: Identifiable, Codable, Equatable {
+struct DayTask: Identifiable, Codable, Equatable, Sendable {
     static let maximumTitleLength = 200
 
     var id: UUID
@@ -15,6 +15,8 @@ struct DayTask: Identifiable, Codable, Equatable {
     var repeatWeekdays: [Int]?
     var isFlexible: Bool?
     var estimatedDuration: TimeInterval?
+    var modifiedAt: Date?
+    var isDeleted: Bool?
 
     init(
         id: UUID = UUID(),
@@ -28,7 +30,9 @@ struct DayTask: Identifiable, Codable, Equatable {
         seriesID: UUID? = nil,
         repeatWeekdays: [Int]? = nil,
         isFlexible: Bool? = nil,
-        estimatedDuration: TimeInterval? = nil
+        estimatedDuration: TimeInterval? = nil,
+        modifiedAt: Date? = Date(),
+        isDeleted: Bool? = nil
     ) {
         self.id = id
         self.title = title
@@ -42,10 +46,12 @@ struct DayTask: Identifiable, Codable, Equatable {
         self.repeatWeekdays = repeatWeekdays
         self.isFlexible = isFlexible
         self.estimatedDuration = estimatedDuration
+        self.modifiedAt = modifiedAt
+        self.isDeleted = isDeleted
     }
 }
 
-enum TaskColor: String, CaseIterable, Codable, Identifiable {
+enum TaskColor: String, CaseIterable, Codable, Identifiable, Sendable {
     case blue, violet, orange, green, pink, red
     case cyan, teal, yellow, indigo, mint, brown
 

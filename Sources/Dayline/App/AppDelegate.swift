@@ -4,7 +4,7 @@ import SwiftUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let store = TaskStore()
+    private let store = TaskStore(syncService: CloudKitTaskSyncService())
     private let popover = NSPopover()
     private let notificationPopover = NSPopover()
     private var statusItem: NSStatusItem?
@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var outsideClickMonitor: Any?
     private var notifiedTaskStarts: [UUID: Date] = [:]
     private var isClosingPopovers = false
+    private var lastCloudRefresh = Date.distantPast
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
@@ -34,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notificationPopover.behavior = .transient
         statusItem = item
         refreshStatusIcon()
+        Task { await store.synchronizeNow() }
 
         taskObserver = store.$tasks
             .dropFirst()
@@ -80,6 +82,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func checkTaskNotifications() {
         let now = Date()
+        if now.timeIntervalSince(lastCloudRefresh) >= 30 {
+            lastCloudRefresh = now
+            Task { await store.synchronizeNow() }
+        }
         store.completeExpiredTasks(at: now)
         store.startCurrentScheduledTask(at: now)
         refreshStatusIcon()

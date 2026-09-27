@@ -136,4 +136,37 @@ final class TaskStoreTests: XCTestCase {
 
         XCTAssertEqual(store.tasks.first?.title.count, DayTask.maximumTitleLength)
     }
+
+    func testDeletedTaskBecomesTombstoneAndStaysHidden() {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("tasks.json")
+        let store = TaskStore(fileURL: url)
+        let task = DayTask(title: "Delete", start: Date(), end: Date().addingTimeInterval(3600))
+
+        store.add(task)
+        store.delete(task)
+
+        XCTAssertTrue(store.tasksForDay(task.start).isEmpty)
+        XCTAssertEqual(store.tasks.first?.isDeleted, true)
+        XCTAssertTrue(TaskStore(fileURL: url).tasksForDay(task.start).isEmpty)
+    }
+
+    func testSynchronizationImportsRemoteTasks() async {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("tasks.json")
+        let remote = DayTask(title: "From iPhone", start: Date(), end: Date().addingTimeInterval(3600))
+        let store = TaskStore(fileURL: url, syncService: StubSyncService(tasks: [remote]))
+
+        await store.synchronizeNow()
+
+        XCTAssertEqual(store.tasksForDay(remote.start).map(\.id), [remote.id])
+        XCTAssertNil(store.syncError)
+        XCTAssertNotNil(store.lastSyncedAt)
+    }
+}
+
+private struct StubSyncService: TaskSyncing {
+    let tasks: [DayTask]
+
+    func merge(localTasks _: [DayTask]) async throws -> [DayTask] {
+        tasks
+    }
 }
