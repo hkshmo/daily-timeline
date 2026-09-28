@@ -20,6 +20,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastBreakAt = Date()
     private var warmupSnoozedUntil: Date?
     private var screenLockedAt: Date?
+    /// Что сейчас показано в окне уведомления.
+    private var shownNotification: ShownNotification?
+
+    private enum ShownNotification {
+        case task
+        case warmup
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         migrateLegacyPreferencesIfNeeded()
@@ -39,7 +46,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.contentViewController = NSHostingController(
             rootView: DaylineView().environmentObject(store).environmentObject(uiState)
         )
-        notificationPopover.behavior = .transient
+        // Уведомления не закрываются кликом мимо — только кнопками. Иначе их легко пропустить:
+        // человек работает, кликает в своё окно, и уведомление исчезает, не успев попасться на глаза.
+        notificationPopover.behavior = .applicationDefined
         statusItem = item
         refreshStatusIcon()
 
@@ -88,7 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func togglePopover() {
         guard let button = statusItem?.button else { return }
-        notificationPopover.performClose(nil)
+        closeNotification()
         if popover.isShown {
             if !mainPopoverHasSheet || uiState.showingSettings { closeVisiblePopovers() }
         } else {
@@ -105,7 +114,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         defer { scheduleNextEvent() }
         let defaults = UserDefaults.standard
         let enabled = defaults.object(forKey: "taskNotifications") as? Bool ?? true
-        guard enabled, !notificationPopover.isShown, !mainPopoverHasSheet else { return }
+        // Если висит старое уведомление о задаче, новое его заменит.
+        guard enabled, !mainPopoverHasSheet else { return }
 
         let dayTasks = store.tasksForDay(now)
         let tasks = dayTasks.filter { !$0.isCompleted && $0.isFlexible != true }
@@ -187,12 +197,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Редактор задачи оставляем открытым, чтобы не потерять несохранённый ввод.
             popover.performClose(nil)
         }
-        if notificationPopover.isShown {
-            notificationPopover.performClose(nil)
-        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             self?.isClosingPopovers = false
         }
+    }
+
+    /// Закрыть уведомление. Если это было «размяться» и его закрыли не кнопкой
+    /// (например, открыли главное окно или его заменило уведомление о задаче) — напомним позже.
+    private func closeNotification() {
+        if shownNotification == .warmup, warmupSnoozedUntil == nil || warmupSnoozedUntil! < Date() {
+            warmupSnoozedUntil = Date().addingTimeInterval(TimeInterval(WarmupReminderPlan.snoozeMinutes * 60))
+            scheduleWarmupReminder()
+        }
+        shownNotification = nil
+        if notificationPopover.isShown { notificationPopover.performClose(nil) }
     }
 
     private var mainPopoverHasSheet: Bool {
@@ -325,28 +343,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             minutes: max(1, Int(now.timeIntervalSince(lastBreakAt) / 60)),
             onDone: { [weak self] in
                 self?.registerBreak()
-                self?.notificationPopover.performClose(nil)
+                self?.closeNotification()
             },
             onSnooze: { [weak self] in
                 guard let self else { return }
                 self.warmupSnoozedUntil = Date().addingTimeInterval(snooze)
                 self.scheduleWarmupReminder()
-                self.notificationPopover.performClose(nil)
+                self.closeNotification()
             }
         )
         notificationPopover.contentSize = NSSize(width: 340, height: 132)
-        notificationPopover.contentViewController = NSHostingController(rootView: view)
-        NSApplication.shared.activate(ignoringOtherApps: true)
+        notificationPopover.contentViewController = FirstClickHostingController(rootView: view)
+        // Без activate: уведомление появляется, но не отбирает фокус у приложения, в котором вы работаете.
         notificationPopover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-
-        // Если окно просто закроют кликом мимо — напомним ещё раз позже.
-        warmupSnoozedUntil = now.addingTimeInterval(snooze)
-        scheduleWarmupReminder()
+        shownNotification = .warmup
+        // Висит, пока не нажмут кнопку, — повторный таймер не нужен.
+        warmupTimer?.invalidate()
+        warmupTimer = nil
     }
 
     private func showTaskNotification(_ task: DayTask, previousTask: DayTask?) {
         guard let button = statusItem?.button, !mainPopoverHasSheet else { return }
         if popover.isShown { popover.performClose(nil) }
+        // Если висело «размяться» — заменяем его (начало задачи важнее), а размяться напомним позже.
+        if shownNotification == .warmup { closeNotification() }
 
         let soundEnabled = UserDefaults.standard.object(forKey: NotificationSoundPreferences.enabledKey) as? Bool ?? true
         if soundEnabled {
@@ -363,26 +383,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             language: language,
             onPostpone: { [weak self] minutes in
                 self?.store.postpone(task, by: minutes)
-                self?.notificationPopover.performClose(nil)
+                self?.closeNotification()
             },
             onStart: { [weak self] in
                 self?.store.toggleStart(task)
                 self?.refreshStatusIcon()
-                self?.notificationPopover.performClose(nil)
+                self?.closeNotification()
             },
             onComplete: { [weak self] in
                 self?.store.complete(task)
                 self?.refreshStatusIcon()
-                self?.notificationPopover.performClose(nil)
+                self?.closeNotification()
             },
             onDismiss: { [weak self] in
-                self?.notificationPopover.performClose(nil)
+                self?.closeNotification()
             }
         )
         notificationPopover.contentSize = NSSize(width: 380, height: previousTask == nil ? 142 : 166)
-        notificationPopover.contentViewController = NSHostingController(rootView: view)
-        NSApplication.shared.activate(ignoringOtherApps: true)
+        notificationPopover.contentViewController = FirstClickHostingController(rootView: view)
+        // Без activate: уведомление не отбирает фокус у приложения, в котором вы работаете.
         notificationPopover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        shownNotification = .task
+    }
+}
+
+/// Уведомления показываются без активации приложения, а в неактивном окне macOS
+/// по умолчанию «съедает» первый клик. Эта обёртка принимает клик сразу,
+/// чтобы «Понятно» срабатывало с первого нажатия.
+private final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+private final class FirstClickHostingController<Content: View>: NSHostingController<Content> {
+    override func loadView() {
+        view = FirstClickHostingView(rootView: rootView)
     }
 }
 
