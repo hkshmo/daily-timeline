@@ -141,7 +141,8 @@ struct TaskEditor: View {
                         seriesID: task?.seriesID,
                         repeatWeekdays: task?.repeatWeekdays,
                         isFlexible: flexible,
-                        estimatedDuration: flexible ? TimeInterval(durationMinutes * 60) : nil
+                        estimatedDuration: flexible ? TimeInterval(durationMinutes * 60) : nil,
+                        occurrenceDate: task?.occurrenceDate
                     )
                     let weekdays: Set<Int>? = switch repeatOption {
                     case .once: nil

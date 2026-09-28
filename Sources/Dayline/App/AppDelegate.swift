@@ -38,7 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = item
         refreshStatusIcon()
 
-        taskObserver = store.$tasks
+        taskObserver = store.$revision
             .dropFirst()
             .sink { [weak self] _ in
                 Task { @MainActor [weak self] in

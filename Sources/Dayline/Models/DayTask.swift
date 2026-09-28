@@ -15,6 +15,7 @@ struct DayTask: Identifiable, Codable, Equatable {
     var repeatWeekdays: [Int]?
     var isFlexible: Bool?
     var estimatedDuration: TimeInterval?
+    var occurrenceDate: Date?
 
     init(
         id: UUID = UUID(),
@@ -28,7 +29,8 @@ struct DayTask: Identifiable, Codable, Equatable {
         seriesID: UUID? = nil,
         repeatWeekdays: [Int]? = nil,
         isFlexible: Bool? = nil,
-        estimatedDuration: TimeInterval? = nil
+        estimatedDuration: TimeInterval? = nil,
+        occurrenceDate: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -42,6 +44,7 @@ struct DayTask: Identifiable, Codable, Equatable {
         self.repeatWeekdays = repeatWeekdays
         self.isFlexible = isFlexible
         self.estimatedDuration = estimatedDuration
+        self.occurrenceDate = occurrenceDate
     }
 }
 
