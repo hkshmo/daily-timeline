@@ -47,10 +47,19 @@ struct DayTimeline: View {
                     }
 
                     if calendar.isDateInToday(date), isVisible(now) {
+                        let lineX = min(width - 2, width * fraction(for: now))
+
                         Rectangle()
                             .fill(.primary)
                             .frame(width: 2, height: trackHeight + 8)
-                            .offset(x: min(width - 2, width * fraction(for: now)), y: -4)
+                            .offset(x: lineX, y: -4)
+                            .allowsHitTesting(false)
+
+                        // Стрелка под линией: остриём вверх, по центру линии.
+                        Triangle()
+                            .fill(.primary)
+                            .frame(width: 12, height: 5)
+                            .offset(x: lineX - 5, y: trackHeight + 3)
                             .allowsHitTesting(false)
                     }
                 }
@@ -259,4 +268,15 @@ private struct TaskPlacement: Identifiable {
     let task: DayTask
     let lane: Int
     var id: UUID { task.id }
+}
+
+private struct Triangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.minY))    // верхняя точка (остриё)
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY)) // правый нижний угол
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY)) // левый нижний угол
+        path.closeSubpath()
+        return path
+    }
 }
