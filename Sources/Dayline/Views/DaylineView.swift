@@ -13,6 +13,7 @@ struct DaylineView: View {
     @State private var showingSettings = false
     @State private var hoveredTaskID: UUID?
     @State private var hoveredDay: Date?
+    @State private var repeatingTaskToDelete: DayTask?
     @State private var dayStripStart = Calendar.current.startOfDay(for: Date())
 
     private var l10n: L10n { L10n(language: language) }
@@ -84,6 +85,26 @@ struct DaylineView: View {
         } message: {
             Text("\(l10n.storageErrorMessage)\n\n\(store.storageError ?? "")")
         }
+        .confirmationDialog(
+            l10n.deleteRepeatingTitle,
+            isPresented: repeatingDeletionPresented,
+            titleVisibility: .visible,
+            presenting: repeatingTaskToDelete
+        ) { task in
+            Button(l10n.deleteOnlyThisDay, role: .destructive) { store.delete(task, scope: .thisDay) }
+            Button(l10n.deleteThisAndFollowing, role: .destructive) { store.delete(task, scope: .thisAndFollowing) }
+            Button(l10n.deleteWholeSeries, role: .destructive) { store.delete(task, scope: .wholeSeries) }
+            Button(l10n.cancel, role: .cancel) {}
+        } message: { task in
+            Text(task.title)
+        }
+    }
+
+    private var repeatingDeletionPresented: Binding<Bool> {
+        Binding(
+            get: { repeatingTaskToDelete != nil },
+            set: { if !$0 { repeatingTaskToDelete = nil } }
+        )
     }
 
     private var storageErrorPresented: Binding<Bool> {
@@ -215,7 +236,11 @@ struct DaylineView: View {
                             } onEdit: {
                                 editorContext = EditorContext(task: task)
                             } onDelete: {
-                                store.delete(task)
+                                if task.seriesID != nil {
+                                    repeatingTaskToDelete = task
+                                } else {
+                                    store.delete(task)
+                                }
                             }
                             .onHover { hovering in
                                 if hovering {

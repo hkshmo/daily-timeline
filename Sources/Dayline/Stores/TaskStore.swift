@@ -20,6 +20,12 @@ struct RecurringTaskOverride: Codable, Equatable {
     var isDeleted: Bool
 }
 
+enum SeriesDeletionScope {
+    case thisDay
+    case thisAndFollowing
+    case wholeSeries
+}
+
 private struct TaskStoreSnapshot: Codable {
     var version = 2
     var oneTimeTasks: [DayTask]
@@ -118,6 +124,31 @@ final class TaskStore: ObservableObject {
             markDeleted(ruleID: ruleID, day: occurrenceDay(for: task))
         } else {
             oneTimeTasks.removeAll { $0.id == task.id }
+        }
+        changed()
+    }
+
+    /// Удаление дня повторяющейся задачи с выбором охвата. Для разовой задачи — обычное удаление.
+    func delete(_ task: DayTask, scope: SeriesDeletionScope) {
+        guard let ruleID = task.seriesID,
+              let index = recurringRules.firstIndex(where: { $0.id == ruleID }) else {
+            delete(task)
+            return
+        }
+        let day = occurrenceDay(for: task)
+        let removesWholeRule = scope == .wholeSeries
+            || (scope == .thisAndFollowing && day <= calendar.startOfDay(for: recurringRules[index].startDate))
+
+        switch scope {
+        case .thisDay:
+            delete(task)
+            return
+        case .thisAndFollowing where !removesWholeRule:
+            recurringRules[index].endDate = day
+            occurrenceOverrides.removeAll { $0.ruleID == ruleID && $0.day >= day }
+        default:
+            recurringRules.remove(at: index)
+            occurrenceOverrides.removeAll { $0.ruleID == ruleID }
         }
         changed()
     }

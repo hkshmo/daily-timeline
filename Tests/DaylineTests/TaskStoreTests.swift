@@ -452,4 +452,33 @@ final class TaskStoreTests: XCTestCase {
         XCTAssertEqual(store.recurringRules.first?.weekdays, otherWeekdays)
         XCTAssertTrue(store.occurrenceOverrides.filter(\.isDeleted).isEmpty)
     }
+
+    func testDeletingThisAndFollowingDaysKeepsEarlierDays() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let store = makeStore(calendar: calendar)
+        addDailyTask(to: store, fromDayOffset: -2, calendar: calendar)
+        let tomorrow = try XCTUnwrap(store.tasksForDay(at(12, dayOffset: 1, calendar: calendar)).first)
+
+        store.delete(tomorrow, scope: .thisAndFollowing)
+
+        XCTAssertEqual(store.tasksForDay(at(12, dayOffset: 0, calendar: calendar)).map(\.title), ["Daily"])
+        XCTAssertTrue(store.tasksForDay(at(12, dayOffset: 1, calendar: calendar)).isEmpty)
+        XCTAssertTrue(store.tasksForDay(at(12, dayOffset: 30, calendar: calendar)).isEmpty)
+        XCTAssertEqual(store.recurringRules.count, 1)
+    }
+
+    func testDeletingWholeSeriesRemovesEveryDay() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let store = makeStore(calendar: calendar)
+        addDailyTask(to: store, fromDayOffset: -2, calendar: calendar)
+        let today = try XCTUnwrap(store.tasksForDay(at(12, dayOffset: 0, calendar: calendar)).first)
+        store.toggleStart(today)
+
+        store.delete(today, scope: .wholeSeries)
+
+        XCTAssertTrue(store.recurringRules.isEmpty)
+        XCTAssertTrue(store.occurrenceOverrides.isEmpty)
+        XCTAssertTrue(store.tasksForDay(at(12, dayOffset: -2, calendar: calendar)).isEmpty)
+        XCTAssertTrue(store.tasksForDay(at(12, dayOffset: 5, calendar: calendar)).isEmpty)
+    }
 }

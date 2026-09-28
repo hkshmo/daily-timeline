@@ -27,6 +27,10 @@ struct L10n {
     }
     var edit: String { ru ? "Изменить" : "Edit" }
     var delete: String { ru ? "Удалить" : "Delete" }
+    var deleteRepeatingTitle: String { ru ? "Удалить повторяющуюся задачу?" : "Delete repeating task?" }
+    var deleteOnlyThisDay: String { ru ? "Только этот день" : "Only this day" }
+    var deleteThisAndFollowing: String { ru ? "Этот и все следующие дни" : "This and all following days" }
+    var deleteWholeSeries: String { ru ? "Все дни, включая прошедшие" : "All days, including past ones" }
     var newBlock: String { ru ? "Новый блок" : "New block" }
     var editBlock: String { ru ? "Изменить блок" : "Edit block" }
     var title: String { ru ? "Название" : "Title" }
