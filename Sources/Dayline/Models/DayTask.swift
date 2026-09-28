@@ -16,6 +16,10 @@ struct DayTask: Identifiable, Codable, Equatable {
     var isFlexible: Bool?
     var estimatedDuration: TimeInterval?
     var occurrenceDate: Date?
+    /// Тип блока. nil — обычная задача (так хранятся все задачи, созданные до появления типов).
+    var kind: TaskKind?
+
+    var isLunch: Bool { kind == .lunch }
 
     init(
         id: UUID = UUID(),
@@ -30,7 +34,8 @@ struct DayTask: Identifiable, Codable, Equatable {
         repeatWeekdays: [Int]? = nil,
         isFlexible: Bool? = nil,
         estimatedDuration: TimeInterval? = nil,
-        occurrenceDate: Date? = nil
+        occurrenceDate: Date? = nil,
+        kind: TaskKind? = nil
     ) {
         self.id = id
         self.title = title
@@ -45,6 +50,49 @@ struct DayTask: Identifiable, Codable, Equatable {
         self.isFlexible = isFlexible
         self.estimatedDuration = estimatedDuration
         self.occurrenceDate = occurrenceDate
+        self.kind = kind
+    }
+}
+
+/// Приёмы пищи. Обычная задача — kind == nil.
+enum TaskKind: String, Codable, CaseIterable, Identifiable {
+    case breakfast
+    case lunch
+    case dinner
+
+    var id: String { rawValue }
+
+    /// SF Symbol для отображения на шкале и в списке.
+    var systemImage: String {
+        switch self {
+        case .breakfast: "cup.and.saucer.fill"
+        case .lunch: "fork.knife"
+        case .dinner: "wineglass.fill"
+        }
+    }
+
+    /// Время по умолчанию при быстром добавлении.
+    var defaultStartHour: Int {
+        switch self {
+        case .breakfast: 8
+        case .lunch: 13
+        case .dinner: 19
+        }
+    }
+
+    var defaultDurationMinutes: Int {
+        switch self {
+        case .breakfast: 30
+        case .lunch, .dinner: 60
+        }
+    }
+
+    var defaultColor: TaskColor {
+        switch self {
+        case .breakfast: .yellow
+        case .lunch: .orange
+        case .dinner: .indigo
+        }
     }
 }
 

@@ -29,9 +29,18 @@ struct DayTimeline: View {
                         let start = fraction(for: task.start)
                         let end = fraction(for: task.end)
                         let highlighted = highlightedTaskID == task.id
+                        let blockWidth = max(5, width * (end - start))
                         RoundedRectangle(cornerRadius: 5)
                             .fill(task.color.swiftUIColor.opacity(opacity(for: task, highlighted: highlighted)))
-                            .frame(width: max(5, width * (end - start)), height: blockHeight)
+                            .frame(width: blockWidth, height: blockHeight)
+                            .overlay {
+                                // Иконка типа (например, обед), если блок достаточно широкий.
+                                if let kind = task.kind, blockWidth >= 14 {
+                                    Image(systemName: kind.systemImage)
+                                        .font(.system(size: blockHeight >= 20 ? 11 : 7, weight: .semibold))
+                                        .foregroundStyle(.white.opacity(highlightedTaskID == nil || highlighted ? 0.95 : 0.4))
+                                }
+                            }
                             .offset(
                                 x: width * start,
                                 y: laneCount == 1 ? 0 : 2 + CGFloat(placement.lane) * 12
@@ -61,6 +70,18 @@ struct DayTimeline: View {
                             .frame(width: 12, height: 5)
                             .offset(x: lineX - 5, y: trackHeight + 3)
                             .allowsHitTesting(false)
+
+                        // Текущее время над линией. Подпись фиксированной ширины центрируется
+                        // по линии, а у краёв шкалы прижимается, чтобы не вылезать за её пределы.
+                        Text(currentTimeLabel)
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.primary)
+                            .frame(width: Self.timeLabelWidth, height: 13)
+                            .offset(
+                                x: min(max(0, lineX + 1 - Self.timeLabelWidth / 2), max(0, width - Self.timeLabelWidth)),
+                                y: -18
+                            )
+                            .allowsHitTesting(false)
                     }
                 }
                 .frame(height: trackHeight)
@@ -75,6 +96,7 @@ struct DayTimeline: View {
                 }
             }
             .frame(height: trackHeight)
+            .padding(.top, 16) // место под подпись текущего времени
 
             HStack {
                 ForEach(scaleHours.indices, id: \.self) { index in
@@ -85,6 +107,13 @@ struct DayTimeline: View {
             .font(.system(size: 10, design: .monospaced))
             .foregroundStyle(.secondary)
         }
+    }
+
+    private static let timeLabelWidth: CGFloat = 40
+
+    private var currentTimeLabel: String {
+        let components = calendar.dateComponents([.hour, .minute], from: now)
+        return String(format: "%02d:%02d", components.hour ?? 0, components.minute ?? 0)
     }
 
     private var scale: TimelineScale {

@@ -10,7 +10,7 @@ struct DaylineView: View {
     @AppStorage("timelineEndHour") private var timelineEndHour = 24
     @State private var editorContext: EditorContext?
     @State private var showingCalendar = false
-    @State private var showingSettings = false
+    @EnvironmentObject private var uiState: PopoverUIState
     @State private var hoveredTaskID: UUID?
     @State private var hoveredDay: Date?
     @State private var repeatingTaskToDelete: DayTask?
@@ -22,7 +22,7 @@ struct DaylineView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            TimelineView(.periodic(from: .now, by: 30)) { context in
+            TimelineView(.everyMinute) { context in
                 VStack(spacing: 18) {
                     DayTimeline(
                         date: store.selectedDate,
@@ -34,6 +34,9 @@ struct DaylineView: View {
                     )
                     HStack {
                         Spacer()
+                        ForEach(TaskKind.allCases) { kind in
+                            mealButton(kind)
+                        }
                         Button {
                             editorContext = EditorContext(task: nil)
                         } label: {
@@ -66,14 +69,15 @@ struct DaylineView: View {
                 task: context.task,
                 date: store.selectedDate,
                 language: language,
-                suggestedStart: context.task == nil ? nextStart : nil
+                suggestedStart: context.task == nil ? nextStart : nil,
+                presetKind: context.presetKind
             ) { task, repeatWeekdays in
                 context.task == nil
                     ? store.add(task, repeatWeekdays: repeatWeekdays)
                     : store.update(task, repeatWeekdays: repeatWeekdays)
             }
         }
-        .sheet(isPresented: $showingSettings) {
+        .sheet(isPresented: $uiState.showingSettings) {
             SettingsView(
                 language: $language,
                 timelineStartHour: $timelineStartHour,
@@ -117,14 +121,18 @@ struct DaylineView: View {
     private var header: some View {
         VStack(spacing: 10) {
             HStack {
-                Text("Dayline")
-                    .font(.title2.bold())
+                // Как у Apple: бренд + имя продукта («Apple Music»).
+                HStack(spacing: 5) {
+                    Text(AppBrand.brand)
+                    Text(AppBrand.product)
+                        .foregroundStyle(.secondary)
+                }
+                .font(.title2.bold())
                 Spacer()
-                Button { showingSettings = true } label: {
+                Button { uiState.showingSettings = true } label: {
                     Image(systemName: "gearshape")
                 }
                 .buttonStyle(IconBlockButtonStyle())
-                .help(l10n.settings)
             }
 
             HStack(spacing: 8) {
@@ -184,17 +192,58 @@ struct DaylineView: View {
                     Image(systemName: "calendar")
                 }
                 .buttonStyle(IconBlockButtonStyle())
-                .help(store.selectedDate.formatted(.dateTime.day().month(.wide).year()))
                 .popover(isPresented: $showingCalendar, arrowEdge: .top) {
                     DatePicker("", selection: $store.selectedDate, displayedComponents: .date)
                         .datePickerStyle(.graphical)
                         .labelsHidden()
                         .padding(12)
                 }
-                Spacer()
+                Spacer(minLength: 8)
+                DayStatusView(
+                    language: language,
+                    isShowingToday: isShowingToday,
+                    onReturnToToday: returnToToday
+                )
+                // Сначала место получает эта панель, а Spacer — только то, что осталось.
+                // Без этого SwiftUI делит место поровну и обрезает название задачи.
+                .layoutPriority(1)
             }
         }
         .padding(18)
+    }
+
+    /// Кнопка приёма пищи. Если он уже есть в этот день — показывает иконку и время
+    /// и открывает его на редактирование; иначе — добавляет новый с временем по умолчанию.
+    @ViewBuilder
+    private func mealButton(_ kind: TaskKind) -> some View {
+        if let meal = store.tasksForDay(store.selectedDate).first(where: { $0.kind == kind }) {
+            let time = meal.start.formatted(.dateTime.hour().minute().locale(language.locale))
+            Button {
+                editorContext = EditorContext(task: meal)
+            } label: {
+                Label(time, systemImage: kind.systemImage)
+            }
+            .controlSize(.small)
+            .foregroundStyle(meal.color.swiftUIColor)
+        } else {
+            Button {
+                editorContext = EditorContext(task: nil, presetKind: kind)
+            } label: {
+                Label(l10n.name(of: kind), systemImage: kind.systemImage)
+            }
+            .controlSize(.small)
+        }
+    }
+
+    /// Выбран сегодняшний день и он виден в полосе дней.
+    private var isShowingToday: Bool {
+        Calendar.current.isDateInToday(store.selectedDate)
+            && dayStripDates.contains { Calendar.current.isDateInToday($0) }
+    }
+
+    private func returnToToday() {
+        store.selectedDate = Date()
+        dayStripStart = Calendar.current.startOfDay(for: Date())
     }
 
     private var dayStripDates: [Date] {
@@ -276,9 +325,84 @@ struct DaylineView: View {
     }
 }
 
+/// Справа от полосы дней: что идёт сейчас и что дальше, а если открыт другой день — кнопка «Сегодня».
+private struct DayStatusView: View {
+    @EnvironmentObject private var store: TaskStore
+    let language: AppLanguage
+    let isShowingToday: Bool
+    let onReturnToToday: () -> Void
+
+    private var l10n: L10n { L10n(language: language) }
+
+    var body: some View {
+        if isShowingToday {
+            TimelineView(.everyMinute) { context in
+                status(at: context.date)
+            }
+        } else {
+            Button(action: onReturnToToday) {
+                Label(l10n.today, systemImage: "arrow.uturn.backward")
+            }
+            .controlSize(.small)
+        }
+    }
+
+    @ViewBuilder
+    private func status(at now: Date) -> some View {
+        // Только задачи с временем: «в любое время» без запуска на шкале не стоят.
+        let tasks = store.tasksForDay(now).filter {
+            !$0.isCompleted && ($0.isFlexible != true || $0.startedAt != nil)
+        }
+        let current = tasks.first { $0.startedAt != nil && $0.start <= now && now < $0.end }
+            ?? tasks.last { $0.start <= now && now < $0.end }
+        let next = tasks.first { $0.start > now && $0.id != current?.id }
+
+        // Места справа от полосы дней мало (~190 pt), поэтому показываем одну задачу —
+        // текущую, а если её нет, то следующую — в две короткие строки.
+        // Полная информация (и «сейчас», и «далее») — во всплывающей подсказке.
+        let focus = current ?? next
+        VStack(alignment: .trailing, spacing: 2) {
+            if let focus {
+                Text(current != nil
+                    ? "\(l10n.nowShort) · \(l10n.remaining(focus.end.timeIntervalSince(now)))"
+                    : "\(l10n.nextShort) · \(l10n.startsIn(focus.start.timeIntervalSince(now)))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(focus.color.swiftUIColor)
+                        .frame(width: 7, height: 7)
+                    Text(focus.title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            } else {
+                Text(l10n.nothingLeftToday)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func tooltip(current: DayTask?, next: DayTask?, now: Date) -> String {
+        var lines: [String] = []
+        if let current {
+            lines.append("\(l10n.nowLabel) \(current.title) · \(l10n.remaining(current.end.timeIntervalSince(now)))")
+        }
+        if let next {
+            let time = next.start.formatted(.dateTime.hour().minute().locale(language.locale))
+            lines.append("\(l10n.nextLabel) \(next.title) · \(l10n.at(time))")
+        }
+        return lines.isEmpty ? l10n.nothingLeftToday : lines.joined(separator: "\n")
+    }
+}
+
 private struct EditorContext: Identifiable {
     let id = UUID()
     let task: DayTask?
+    var presetKind: TaskKind?
 }
 
 private struct TaskRow: View {
@@ -297,10 +421,17 @@ private struct TaskRow: View {
                 .fill(task.color.swiftUIColor)
                 .frame(width: 4, height: 30)
             VStack(alignment: .leading, spacing: 3) {
-                Text(task.title)
-                    .fontWeight(.medium)
-                    .strikethrough(task.isCompleted)
-                    .foregroundStyle(task.isCompleted ? .secondary : .primary)
+                HStack(spacing: 5) {
+                    if let kind = task.kind {
+                        Image(systemName: kind.systemImage)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(task.color.swiftUIColor)
+                    }
+                    Text(task.title)
+                        .fontWeight(.medium)
+                        .strikethrough(task.isCompleted)
+                        .foregroundStyle(task.isCompleted ? .secondary : .primary)
+                }
                 HStack(spacing: 6) {
                     if task.isFlexible == true && task.startedAt == nil {
                         Text("\(L10n(language: language).anytime) · \(L10n(language: language).minutes(Int((task.estimatedDuration ?? 3600) / 60)))")
@@ -327,27 +458,23 @@ private struct TaskRow: View {
             .buttonStyle(IconBlockButtonStyle())
             .foregroundStyle(task.startedAt == nil ? Color.secondary : Color.green)
             .disabled(task.isCompleted)
-            .help(task.startedAt == nil ? L10n(language: language).startTask : L10n(language: language).undoStart)
             Button(action: onToggle) {
                 Image(systemName: task.isCompleted ? "stop.circle.fill" : "stop.circle")
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(IconBlockButtonStyle(tint: task.isCompleted ? .red : .primary))
             .foregroundStyle(task.isCompleted ? Color.red : Color.secondary)
-            .help(task.isCompleted ? L10n(language: language).undoCompletion : L10n(language: language).completeTask)
             Button(action: onEdit) {
                 Image(systemName: "pencil")
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(IconBlockButtonStyle())
-            .help(L10n(language: language).edit)
             Button(role: .destructive, action: onDelete) {
                 Image(systemName: "trash")
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(IconBlockButtonStyle(tint: .red))
             .foregroundStyle(.red)
-            .help(L10n(language: language).delete)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
@@ -390,6 +517,8 @@ private struct SettingsView: View {
     @AppStorage("taskNotifications") private var taskNotifications = true
     @AppStorage(NotificationSoundPreferences.enabledKey) private var soundNotifications = true
     @AppStorage(NotificationSoundPreferences.nameKey) private var customSoundName = ""
+    @AppStorage(WarmupReminderPlan.enabledKey) private var warmupReminders = true
+    @AppStorage(WarmupReminderPlan.intervalKey) private var warmupInterval = WarmupReminderPlan.defaultIntervalMinutes
     @State private var previewSound: NSSound?
     @State private var soundError: String?
 
@@ -431,6 +560,20 @@ private struct SettingsView: View {
                     }
                     .controlSize(.small)
                 }
+            }
+
+            Divider()
+            Toggle(l10n.warmupReminders, isOn: $warmupReminders)
+            if warmupReminders {
+                Picker(l10n.warmupInterval, selection: $warmupInterval) {
+                    ForEach(WarmupReminderPlan.intervalOptions, id: \.self) { minutes in
+                        Text(l10n.duration(TimeInterval(minutes * 60))).tag(minutes)
+                    }
+                }
+                Text(l10n.warmupHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Divider()

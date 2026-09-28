@@ -1,4 +1,6 @@
-# Dayline
+# Moonkite Day
+
+> Приложение линейки **Moonkite**. Внутреннее имя проекта — Dayline.
 
 Нативное menu bar приложение для macOS: расписание дня, временная шкала, повторяющиеся задачи, напоминания и локальное хранение данных.
 
@@ -20,7 +22,7 @@ swift test
 
 ## Сборка приложения
 
-В Xcode выберите `Product → Archive`, затем `Distribute App → Custom → Copy App`. Полученный `Dayline.app` можно перенести в папку «Программы».
+В Xcode выберите `Product → Archive`, затем `Distribute App → Custom → Copy App`. Полученный `Moonkite Day.app` можно перенести в папку «Программы».
 
 Release-сборка универсальна для Intel и Apple Silicon. Сборка из терминала:
 

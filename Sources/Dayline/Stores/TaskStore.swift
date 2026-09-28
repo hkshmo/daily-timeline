@@ -11,6 +11,7 @@ struct RecurringTaskRule: Identifiable, Codable, Equatable {
     var weekdays: [Int]
     var isFlexible: Bool
     var estimatedDuration: TimeInterval?
+    var kind: TaskKind?
 }
 
 struct RecurringTaskOverride: Codable, Equatable {
@@ -335,7 +336,8 @@ final class TaskStore: ObservableObject {
             repeatWeekdays: rule.weekdays,
             isFlexible: rule.isFlexible,
             estimatedDuration: rule.estimatedDuration,
-            occurrenceDate: day
+            occurrenceDate: day,
+            kind: rule.kind
         )
     }
 
@@ -405,7 +407,8 @@ final class TaskStore: ObservableObject {
             color: task.color,
             weekdays: weekdays.sorted(),
             isFlexible: task.isFlexible == true,
-            estimatedDuration: task.estimatedDuration
+            estimatedDuration: task.estimatedDuration,
+            kind: task.kind
         )
     }
 
@@ -548,6 +551,7 @@ final class TaskStore: ObservableObject {
             && abs(lhs.end.timeIntervalSince(rhs.end)) <= 1
             && (lhs.isFlexible == true) == (rhs.isFlexible == true)
             && lhs.estimatedDuration == rhs.estimatedDuration
+            && lhs.kind == rhs.kind
     }
 
     private func persist() {
@@ -630,6 +634,7 @@ final class TaskStore: ObservableObject {
 
     private static func defaultFileURL() -> URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        // Папка осталась от старого имени (Dayline): не переименовываем, чтобы не потерять задачи.
         return base.appendingPathComponent("Dayline", isDirectory: true).appendingPathComponent("tasks.json")
     }
 

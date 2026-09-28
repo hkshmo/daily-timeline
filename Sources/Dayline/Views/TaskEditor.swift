@@ -10,6 +10,7 @@ struct TaskEditor: View {
     @State private var selectedWeekdays: Set<Int>
     @State private var timingOption: TaskTimingOption
     @State private var durationMinutes: Int
+    @State private var kind: TaskKind?
 
     private let task: DayTask?
     private let language: AppLanguage
@@ -20,6 +21,7 @@ struct TaskEditor: View {
         date: Date,
         language: AppLanguage,
         suggestedStart: Date? = nil,
+        presetKind: TaskKind? = nil,
         onSave: @escaping (DayTask, Set<Int>?) -> Void
     ) {
         self.task = task
@@ -30,11 +32,19 @@ struct TaskEditor: View {
         let hour = calendar.component(.hour, from: now)
         let minute = calendar.component(.minute, from: now)
         let currentStart = calendar.date(bySettingHour: hour, minute: minute, second: 0, of: date) ?? date
-        let initialStart = task?.start ?? suggestedStart ?? currentStart
-        _title = State(initialValue: task?.title ?? "")
+        // Быстрое добавление приёма пищи: время, длительность и цвет по умолчанию для этого типа.
+        let presetStart = presetKind.flatMap {
+            calendar.date(bySettingHour: $0.defaultStartHour, minute: 0, second: 0, of: date)
+        }
+        let initialStart = task?.start ?? presetStart ?? suggestedStart ?? currentStart
+        let presetEnd = presetKind.flatMap {
+            calendar.date(byAdding: .minute, value: $0.defaultDurationMinutes, to: initialStart)
+        }
+        _kind = State(initialValue: task == nil ? presetKind : task?.kind)
+        _title = State(initialValue: task?.title ?? presetKind.map { L10n(language: language).name(of: $0) } ?? "")
         _start = State(initialValue: initialStart)
-        _end = State(initialValue: task?.end ?? calendar.date(byAdding: .hour, value: 1, to: initialStart)!)
-        _color = State(initialValue: task?.color ?? TaskColor.allCases.randomElement() ?? .blue)
+        _end = State(initialValue: task?.end ?? presetEnd ?? calendar.date(byAdding: .hour, value: 1, to: initialStart)!)
+        _color = State(initialValue: task?.color ?? presetKind?.defaultColor ?? TaskColor.allCases.randomElement() ?? .blue)
         let weekdays = Set(task?.repeatWeekdays ?? (task?.seriesID == nil ? [] : Array(1...7)))
         if task == nil {
             _repeatOption = State(initialValue: .daily)
@@ -63,6 +73,19 @@ struct TaskEditor: View {
                         title = String(value.prefix(DayTask.maximumTitleLength))
                     }
                 }
+            Picker(l10n.blockType, selection: $kind) {
+                Text(l10n.regularTask).tag(TaskKind?.none)
+                ForEach(TaskKind.allCases) { option in
+                    Label(l10n.name(of: option), systemImage: option.systemImage).tag(TaskKind?.some(option))
+                }
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: kind) { oldKind, newKind in
+                // Подставляем название приёма пищи, если поле пустое или в нём название прошлого типа.
+                let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let newKind, trimmed.isEmpty || oldKind.map({ l10n.name(of: $0) }) == trimmed else { return }
+                title = l10n.name(of: newKind)
+            }
             Picker(l10n.repeatMode, selection: $repeatOption) {
                 Text(l10n.todayOnly).tag(TaskRepeatOption.once)
                 Text(l10n.everyDay).tag(TaskRepeatOption.daily)
@@ -142,7 +165,8 @@ struct TaskEditor: View {
                         repeatWeekdays: task?.repeatWeekdays,
                         isFlexible: flexible,
                         estimatedDuration: flexible ? TimeInterval(durationMinutes * 60) : nil,
-                        occurrenceDate: task?.occurrenceDate
+                        occurrenceDate: task?.occurrenceDate,
+                        kind: kind
                     )
                     let weekdays: Set<Int>? = switch repeatOption {
                     case .once: nil

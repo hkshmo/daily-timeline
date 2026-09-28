@@ -481,4 +481,56 @@ final class TaskStoreTests: XCTestCase {
         XCTAssertTrue(store.tasksForDay(at(12, dayOffset: -2, calendar: calendar)).isEmpty)
         XCTAssertTrue(store.tasksForDay(at(12, dayOffset: 5, calendar: calendar)).isEmpty)
     }
+
+    func testLunchKindIsKeptForRepeatingTasksAndAfterReload() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent("tasks.json")
+        let store = TaskStore(calendar: calendar, fileURL: url)
+        store.add(
+            DayTask(
+                title: "Обед",
+                start: at(13, dayOffset: 0, calendar: calendar),
+                end: at(14, dayOffset: 0, calendar: calendar),
+                kind: .lunch
+            ),
+            repeatWeekdays: Set(1...7)
+        )
+        store.add(DayTask(
+            title: "Work",
+            start: at(9, dayOffset: 0, calendar: calendar),
+            end: at(10, dayOffset: 0, calendar: calendar)
+        ))
+
+        let reloaded = TaskStore(calendar: calendar, fileURL: url)
+        let tomorrow = reloaded.tasksForDay(at(12, dayOffset: 1, calendar: calendar))
+        XCTAssertEqual(tomorrow.first?.isLunch, true)
+        let today = reloaded.tasksForDay(at(12, dayOffset: 0, calendar: calendar))
+        XCTAssertEqual(today.map(\.isLunch), [false, true])
+    }
+
+    func testWarmupReminderComesIntervalAfterLastBreak() {
+        let lastBreak = Date(timeIntervalSince1970: 1_000_000)
+        XCTAssertEqual(
+            WarmupReminderPlan.nextReminder(lastBreakAt: lastBreak, snoozedUntil: nil, intervalMinutes: 60),
+            lastBreak.addingTimeInterval(3600)
+        )
+    }
+
+    func testWarmupReminderRespectsSnooze() {
+        let lastBreak = Date(timeIntervalSince1970: 1_000_000)
+        let snoozed = lastBreak.addingTimeInterval(3600 + 600)
+        XCTAssertEqual(
+            WarmupReminderPlan.nextReminder(lastBreakAt: lastBreak, snoozedUntil: snoozed, intervalMinutes: 60),
+            snoozed
+        )
+        // Отложили на момент раньше срока — срок важнее.
+        XCTAssertEqual(
+            WarmupReminderPlan.nextReminder(
+                lastBreakAt: lastBreak, snoozedUntil: lastBreak.addingTimeInterval(60), intervalMinutes: 60
+            ),
+            lastBreak.addingTimeInterval(3600)
+        )
+    }
 }

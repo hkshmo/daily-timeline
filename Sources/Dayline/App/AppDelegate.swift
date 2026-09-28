@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = TaskStore()
+    private let uiState = PopoverUIState()
     private let popover = NSPopover()
     private let notificationPopover = NSPopover()
     private var statusItem: NSStatusItem?
@@ -15,6 +16,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var isClosingPopovers = false
     private var notificationSound: NSSound?
     private var systemObservers: [NSObjectProtocol] = []
+    private var warmupTimer: Timer?
+    private var lastBreakAt = Date()
+    private var warmupSnoozedUntil: Date?
+    private var screenLockedAt: Date?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         migrateLegacyPreferencesIfNeeded()
@@ -24,7 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let button = item.button {
             button.image = DaylineStatusIcon.make(isActive: false, at: Date())
             button.imagePosition = .imageOnly
-            button.toolTip = "Dayline"
+            button.toolTip = AppBrand.fullName
             button.target = self
             button.action = #selector(togglePopover)
         }
@@ -32,7 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
         popover.contentSize = NSSize(width: 520, height: 580)
         popover.contentViewController = NSHostingController(
-            rootView: DaylineView().environmentObject(store)
+            rootView: DaylineView().environmentObject(store).environmentObject(uiState)
         )
         notificationPopover.behavior = .transient
         statusItem = item
@@ -69,6 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             selector: #selector(checkTaskNotifications), name: NSWorkspace.didWakeNotification,
             object: nil
         )
+        setUpWarmupReminders()
         outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown]
         ) { [weak self] _ in
@@ -84,7 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let button = statusItem?.button else { return }
         notificationPopover.performClose(nil)
         if popover.isShown {
-            if !mainPopoverHasSheet { closeVisiblePopovers() }
+            if !mainPopoverHasSheet || uiState.showingSettings { closeVisiblePopovers() }
         } else {
             NSApplication.shared.activate(ignoringOtherApps: true)
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
@@ -169,7 +175,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func closeVisiblePopovers() {
         guard !isClosingPopovers else { return }
         isClosingPopovers = true
-        if popover.isShown && !mainPopoverHasSheet {
+        if popover.isShown && uiState.showingSettings {
+            // Настройки применяются сразу, терять нечего: закрываем лист и само окно.
+            // Окно закрываем чуть позже — пока лист висит, NSPopover закрываться отказывается.
+            uiState.showingSettings = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                guard let self, self.popover.isShown, !self.mainPopoverHasSheet else { return }
+                self.popover.performClose(nil)
+            }
+        } else if popover.isShown && !mainPopoverHasSheet {
+            // Редактор задачи оставляем открытым, чтобы не потерять несохранённый ввод.
             popover.performClose(nil)
         }
         if notificationPopover.isShown {
@@ -198,6 +213,135 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 && now < $0.end
         }
         statusItem?.button?.image = DaylineStatusIcon.make(isActive: active, at: now)
+    }
+
+    // MARK: - Напоминание размяться
+
+    private func setUpWarmupReminders() {
+        // Настройки меняются в окне настроек — пересчитываем таймер.
+        systemObservers.append(NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.scheduleWarmupReminder() }
+        })
+        // Сон Mac — это перерыв.
+        systemObservers.append(NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.registerBreak() }
+        })
+        // Экран был заблокирован достаточно долго — тоже перерыв.
+        let distributed = DistributedNotificationCenter.default()
+        systemObservers.append(distributed.addObserver(
+            forName: Notification.Name("com.apple.screenIsLocked"), object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.screenLockedAt = Date() }
+        })
+        systemObservers.append(distributed.addObserver(
+            forName: Notification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if let lockedAt = self.screenLockedAt,
+                   Date().timeIntervalSince(lockedAt) >= WarmupReminderPlan.awayThreshold {
+                    self.registerBreak()
+                }
+                self.screenLockedAt = nil
+            }
+        })
+        scheduleWarmupReminder()
+    }
+
+    private func registerBreak(at date: Date = Date()) {
+        lastBreakAt = date
+        warmupSnoozedUntil = nil
+        scheduleWarmupReminder()
+    }
+
+    private func scheduleWarmupReminder() {
+        warmupTimer?.invalidate()
+        warmupTimer = nil
+        guard WarmupReminderPlan.isEnabled else { return }
+        let date = WarmupReminderPlan.nextReminder(
+            lastBreakAt: lastBreakAt,
+            snoozedUntil: warmupSnoozedUntil,
+            intervalMinutes: WarmupReminderPlan.intervalMinutes
+        )
+        let timer = Timer(
+            fireAt: max(date, Date().addingTimeInterval(1)),
+            interval: 0,
+            target: self,
+            selector: #selector(warmupTimerFired),
+            userInfo: nil,
+            repeats: false
+        )
+        timer.tolerance = 5
+        RunLoop.main.add(timer, forMode: .common)
+        warmupTimer = timer
+    }
+
+    @objc private func warmupTimerFired() {
+        let now = Date()
+        guard WarmupReminderPlan.isEnabled else { return }
+
+        // Мышь и клавиатура давно не трогались — человек и так отошёл.
+        let anyInput = CGEventType(rawValue: UInt32.max)!
+        let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: anyInput)
+        if idle >= WarmupReminderPlan.awayThreshold {
+            registerBreak(at: now)
+            return
+        }
+        // Идёт завтрак/обед/ужин — перерыв уже есть, отсчёт начнётся после него.
+        if let meal = store.tasksForDay(now).first(where: {
+            $0.kind != nil && !$0.isCompleted && $0.start <= now && now < $0.end
+        }) {
+            registerBreak(at: meal.end)
+            return
+        }
+        // Сейчас открыто другое окно — попробуем через минуту.
+        guard let button = statusItem?.button, !notificationPopover.isShown, !mainPopoverHasSheet else {
+            warmupSnoozedUntil = now.addingTimeInterval(60)
+            scheduleWarmupReminder()
+            return
+        }
+        showWarmupReminder(from: button, now: now)
+    }
+
+    private func showWarmupReminder(from button: NSStatusBarButton, now: Date) {
+        if popover.isShown { popover.performClose(nil) }
+
+        let soundEnabled = UserDefaults.standard.object(forKey: NotificationSoundPreferences.enabledKey) as? Bool ?? true
+        if soundEnabled {
+            notificationSound?.stop()
+            notificationSound = NotificationSoundPreferences.makeSound()
+            notificationSound?.play()
+        }
+
+        let rawLanguage = UserDefaults.standard.string(forKey: "appLanguage") ?? AppLanguage.russian.rawValue
+        let language = AppLanguage(rawValue: rawLanguage) ?? .russian
+        let snooze = TimeInterval(WarmupReminderPlan.snoozeMinutes * 60)
+        let view = WarmupReminderView(
+            language: language,
+            minutes: max(1, Int(now.timeIntervalSince(lastBreakAt) / 60)),
+            onDone: { [weak self] in
+                self?.registerBreak()
+                self?.notificationPopover.performClose(nil)
+            },
+            onSnooze: { [weak self] in
+                guard let self else { return }
+                self.warmupSnoozedUntil = Date().addingTimeInterval(snooze)
+                self.scheduleWarmupReminder()
+                self.notificationPopover.performClose(nil)
+            }
+        )
+        notificationPopover.contentSize = NSSize(width: 340, height: 132)
+        notificationPopover.contentViewController = NSHostingController(rootView: view)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        notificationPopover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+
+        // Если окно просто закроют кликом мимо — напомним ещё раз позже.
+        warmupSnoozedUntil = now.addingTimeInterval(snooze)
+        scheduleWarmupReminder()
     }
 
     private func showTaskNotification(_ task: DayTask, previousTask: DayTask?) {
@@ -242,6 +386,76 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+/// Состояние окна, которое нужно знать AppDelegate: например, открыты ли настройки.
+@MainActor
+final class PopoverUIState: ObservableObject {
+    @Published var showingSettings = false
+}
+
+/// Настройки и расчёт напоминаний размяться.
+@MainActor
+enum WarmupReminderPlan {
+    static let enabledKey = "warmupReminders"
+    static let intervalKey = "warmupIntervalMinutes"
+    static let defaultIntervalMinutes = 60
+    static let intervalOptions = [30, 45, 60, 90, 120]
+    static let snoozeMinutes = 10
+    /// Сколько секунд без мыши и клавиатуры (или с заблокированным экраном) считается перерывом.
+    static let awayThreshold: TimeInterval = 5 * 60
+
+    static var isEnabled: Bool {
+        UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true
+    }
+
+    static var intervalMinutes: Int {
+        let value = UserDefaults.standard.integer(forKey: intervalKey)
+        return intervalOptions.contains(value) ? value : defaultIntervalMinutes
+    }
+
+    /// Когда напомнить: через интервал после последнего перерыва, но не раньше, чем кончится «отложить».
+    static func nextReminder(lastBreakAt: Date, snoozedUntil: Date?, intervalMinutes: Int) -> Date {
+        let due = lastBreakAt.addingTimeInterval(TimeInterval(intervalMinutes * 60))
+        guard let snoozedUntil else { return due }
+        return max(due, snoozedUntil)
+    }
+}
+
+private struct WarmupReminderView: View {
+    let language: AppLanguage
+    let minutes: Int
+    let onDone: () -> Void
+    let onSnooze: () -> Void
+
+    private var l10n: L10n { L10n(language: language) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "figure.walk")
+                    .foregroundStyle(.green)
+                Text(l10n.warmupTitle)
+                    .font(.headline)
+            }
+            Text(l10n.warmupMessage(minutes: minutes))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button(action: onDone) {
+                    Label(l10n.warmupDone, systemImage: "checkmark")
+                }
+                .buttonStyle(.borderedProminent)
+                Button(l10n.warmupSnooze(WarmupReminderPlan.snoozeMinutes), action: onSnooze)
+                Spacer()
+            }
+            .controlSize(.small)
+        }
+        .padding(14)
+        .frame(width: 340, height: 132, alignment: .topLeading)
+        .environment(\.locale, language.locale)
+    }
+}
+
 private struct TaskNotificationView: View {
     let task: DayTask
     let previousTask: DayTask?
@@ -250,6 +464,9 @@ private struct TaskNotificationView: View {
     let onStart: () -> Void
     let onComplete: () -> Void
     let onDismiss: () -> Void
+
+    /// Подсказка к кнопкам «+5» / «+10»: показывается строкой над кнопками, ничего не перекрывая.
+    @State private var postponeHint: String?
 
     private var l10n: L10n { L10n(language: language) }
 
@@ -272,35 +489,45 @@ private struct TaskNotificationView: View {
                 Text(l10n.taskStarted)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Spacer()
-                Button(action: onDismiss) {
-                    Image(systemName: "xmark")
-                        .font(.caption.bold())
-                }
-                .buttonStyle(IconBlockButtonStyle())
-                .foregroundStyle(.secondary)
             }
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(task.title)
-                    .font(.headline)
-                    .lineLimit(1)
-                Text(task.start.formatted(.dateTime.hour().minute().locale(language.locale)))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    if let kind = task.kind {
+                        Image(systemName: kind.systemImage)
+                            .foregroundStyle(task.color.swiftUIColor)
+                    }
+                    Text(task.title)
+                        .lineLimit(1)
+                }
+                .font(.headline)
+                HStack {
+                    Text("\(time(task.start)) – \(time(task.end))")
+                    Spacer()
+                    if let postponeHint {
+                        Text(postponeHint)
+                            .transition(.opacity)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .animation(.easeOut(duration: 0.12), value: postponeHint)
             }
 
             HStack(spacing: 7) {
-                Button(action: onStart) {
-                    Label(
-                        task.startedAt == nil ? l10n.startTask : l10n.undoStart,
-                        systemImage: task.startedAt == nil ? "play.fill" : "arrow.uturn.backward"
-                    )
-                }
-                .buttonStyle(.borderedProminent)
+                // Главное действие — просто закрыть: задача уже началась сама. Enter тоже закрывает.
+                Button(l10n.gotIt, action: onDismiss)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
                 Button("+5") { onPostpone(5) }
+                    .onHover { postponeHint = $0 ? l10n.postponeBy(5) : nil }
                 Button("+10") { onPostpone(10) }
+                    .onHover { postponeHint = $0 ? l10n.postponeBy(10) : nil }
                 Spacer()
+                // Редкое действие — компактной иконкой с подсказкой.
+                Button(action: onStart) {
+                    Image(systemName: task.startedAt == nil ? "play.fill" : "arrow.uturn.backward")
+                }
                 Button(action: onComplete) {
                     Label(l10n.completeTask, systemImage: "checkmark")
                 }
@@ -310,6 +537,10 @@ private struct TaskNotificationView: View {
         .padding(14)
         .frame(width: 380, height: previousTask == nil ? 142 : 166)
         .environment(\.locale, language.locale)
+    }
+
+    private func time(_ date: Date) -> String {
+        date.formatted(.dateTime.hour().minute().locale(language.locale))
     }
 }
 
@@ -351,7 +582,7 @@ private enum DaylineStatusIcon {
             return true
         }
         image.isTemplate = !isActive
-        image.accessibilityDescription = "Dayline"
+        image.accessibilityDescription = AppBrand.fullName
         return image
     }
 
@@ -374,7 +605,7 @@ private enum DaylineStatusIcon {
             return true
         }
         image.isTemplate = true
-        image.accessibilityDescription = "Dayline"
+        image.accessibilityDescription = AppBrand.fullName
         return image
     }
 }
