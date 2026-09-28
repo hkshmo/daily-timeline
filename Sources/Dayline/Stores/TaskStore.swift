@@ -14,7 +14,7 @@ final class TaskStore: ObservableObject {
     private static let maximumStorageBytes = 20 * 1024 * 1024
     private static let maximumTaskCount = 50_000
 
-    init(calendar: Calendar = .current, fileURL: URL? = nil) {
+    init(calendar: Calendar = .autoupdatingCurrent, fileURL: URL? = nil) {
         self.calendar = calendar
         self.fileURL = fileURL ?? Self.defaultFileURL()
         load()

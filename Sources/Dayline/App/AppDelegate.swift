@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notifiedTaskStarts: [UUID: Date] = [:]
     private var isClosingPopovers = false
     private var notificationSound: NSSound?
+    private var systemObservers: [NSObjectProtocol] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         migrateLegacyPreferencesIfNeeded()
@@ -52,11 +53,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             selector: #selector(applicationDidResignActive), name: NSApplication.didResignActiveNotification,
             object: nil
         )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(checkTaskNotifications), name: .NSCalendarDayChanged,
-            object: nil
-        )
+        // Смена дня, перевод системных часов и смена часового пояса: таймер стоит
+        // на конкретное время, поэтому после таких событий его нужно пересчитать.
+        // Эти уведомления могут приходить не на главном потоке — принимаем их на .main.
+        for name in [Notification.Name.NSCalendarDayChanged, .NSSystemClockDidChange, .NSSystemTimeZoneDidChange] {
+            let token = NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.systemTimeDidChange()
+                }
+            }
+            systemObservers.append(token)
+        }
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
             selector: #selector(checkTaskNotifications), name: NSWorkspace.didWakeNotification,
@@ -109,6 +116,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .max { $0.end < $1.end }
         notifiedTaskStarts[task.id] = task.start
         showTaskNotification(task, previousTask: previousTask)
+    }
+
+    private func systemTimeDidChange() {
+        NSTimeZone.resetSystemTimeZone()
+        checkTaskNotifications()
     }
 
     private func scheduleNextEvent() {

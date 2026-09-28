@@ -149,7 +149,7 @@ final class TaskStoreTests: XCTestCase {
 
     func testFreeTimeRangesForEmptyDay() {
         XCTAssertEqual(
-            TimelineFreeTimeCalculator.ranges(tasks: [], startHour: 9, endHour: 18),
+            TimelineFreeTimeCalculator.ranges(tasks: [], day: Date(), startHour: 9, endHour: 18),
             [CGFloat(0)...CGFloat(1)]
         )
     }
@@ -168,11 +168,48 @@ final class TaskStoreTests: XCTestCase {
         ]
 
         let ranges = TimelineFreeTimeCalculator.ranges(
-            tasks: tasks, startHour: 9, endHour: 18, calendar: calendar
+            tasks: tasks, day: day, startHour: 9, endHour: 18, calendar: calendar
         )
 
         XCTAssertEqual(ranges.count, 1)
         XCTAssertEqual(ranges[0].lowerBound, CGFloat(2.0 / 9.0), accuracy: 0.0001)
         XCTAssertEqual(ranges[0].upperBound, CGFloat(8.0 / 9.0), accuracy: 0.0001)
+    }
+
+    func testFreeTimeRangesHandleTaskCrossingMidnight() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let day = Date(timeIntervalSince1970: 1_704_067_200)
+        func at(_ hour: Int, dayOffset: Int = 0) -> Date {
+            let base = calendar.date(byAdding: .day, value: dayOffset, to: day)!
+            return calendar.date(bySettingHour: hour, minute: 0, second: 0, of: base)!
+        }
+        // 22:00 → 02:00 следующего дня на шкале 18–24: занято с 22:00 до конца шкалы.
+        let tasks = [DayTask(title: "Night", start: at(22), end: at(2, dayOffset: 1))]
+
+        let ranges = TimelineFreeTimeCalculator.ranges(
+            tasks: tasks, day: day, startHour: 18, endHour: 24, calendar: calendar
+        )
+
+        XCTAssertEqual(ranges.count, 1)
+        XCTAssertEqual(ranges[0].lowerBound, 0, accuracy: 0.0001)
+        XCTAssertEqual(ranges[0].upperBound, CGFloat(4.0 / 6.0), accuracy: 0.0001)
+    }
+
+    func testFreeTimeRangesIgnoreTasksFromOtherDays() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let day = Date(timeIntervalSince1970: 1_704_067_200)
+        let nextDay = calendar.date(byAdding: .day, value: 1, to: day)!
+        let task = DayTask(
+            title: "Tomorrow",
+            start: calendar.date(bySettingHour: 10, minute: 0, second: 0, of: nextDay)!,
+            end: calendar.date(bySettingHour: 11, minute: 0, second: 0, of: nextDay)!
+        )
+
+        XCTAssertEqual(
+            TimelineFreeTimeCalculator.ranges(tasks: [task], day: day, startHour: 9, endHour: 18, calendar: calendar),
+            [CGFloat(0)...CGFloat(1)]
+        )
     }
 }

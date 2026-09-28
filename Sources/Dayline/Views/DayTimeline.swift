@@ -78,19 +78,16 @@ struct DayTimeline: View {
         }
     }
 
+    private var scale: TimelineScale {
+        TimelineScale(day: date, startHour: startHour, endHour: endHour, calendar: calendar)
+    }
+
     private func fraction(for date: Date) -> CGFloat {
-        let value = seconds(for: date)
-        let start = startHour * 3600
-        let duration = max(1, (endHour - startHour) * 3600)
-        return min(1, max(0, CGFloat(value - start) / CGFloat(duration)))
+        scale.fraction(for: date)
     }
 
     private var visibleTasks: [DayTask] {
-        tasks.filter {
-            ($0.isFlexible != true || $0.startedAt != nil)
-                && seconds(for: $0.end) > startHour * 3600
-                && seconds(for: $0.start) < endHour * 3600
-        }
+        tasks.filter { ($0.isFlexible != true || $0.startedAt != nil) && scale.overlaps($0) }
     }
 
     private var taskPlacements: [TaskPlacement] {
@@ -111,6 +108,7 @@ struct DayTimeline: View {
     private var freeTimeRanges: [ClosedRange<CGFloat>] {
         TimelineFreeTimeCalculator.ranges(
             tasks: tasks,
+            day: date,
             startHour: startHour,
             endHour: endHour,
             calendar: calendar
@@ -149,13 +147,7 @@ struct DayTimeline: View {
     }
 
     private func isVisible(_ date: Date) -> Bool {
-        let value = seconds(for: date)
-        return value >= startHour * 3600 && value <= endHour * 3600
-    }
-
-    private func seconds(for date: Date) -> Int {
-        let components = calendar.dateComponents([.hour, .minute, .second], from: date)
-        return (components.hour ?? 0) * 3600 + (components.minute ?? 0) * 60 + (components.second ?? 0)
+        scale.contains(date)
     }
 
     private func opacity(for task: DayTask, highlighted: Bool) -> Double {
@@ -165,26 +157,55 @@ struct DayTimeline: View {
     }
 }
 
+/// Видимый интервал шкалы: конкретные даты начала и конца для выбранного дня.
+/// Считаем по реальным датам, а не по времени суток, чтобы задачи через полночь
+/// (например, 23:00 → 01:00) не «переворачивались» на шкале.
+struct TimelineScale {
+    let start: Date
+    let end: Date
+
+    init(day: Date, startHour: Int, endHour: Int, calendar: Calendar = .current) {
+        let dayStart = calendar.startOfDay(for: day)
+        func time(_ hour: Int) -> Date {
+            let hour = min(max(hour, 0), 24)
+            if hour == 24 {
+                return calendar.date(byAdding: .day, value: 1, to: dayStart)
+                    ?? dayStart.addingTimeInterval(86_400)
+            }
+            return calendar.date(bySettingHour: hour, minute: 0, second: 0, of: dayStart)
+                ?? dayStart.addingTimeInterval(TimeInterval(hour * 3600))
+        }
+        start = time(startHour)
+        end = max(time(endHour), start.addingTimeInterval(1))
+    }
+
+    func fraction(for date: Date) -> CGFloat {
+        let value = date.timeIntervalSince(start) / end.timeIntervalSince(start)
+        return CGFloat(min(1, max(0, value)))
+    }
+
+    func overlaps(_ task: DayTask) -> Bool {
+        task.end > start && task.start < end
+    }
+
+    func contains(_ date: Date) -> Bool {
+        date >= start && date <= end
+    }
+}
+
 enum TimelineFreeTimeCalculator {
     static func ranges(
         tasks: [DayTask],
+        day: Date,
         startHour: Int,
         endHour: Int,
         calendar: Calendar = .current
     ) -> [ClosedRange<CGFloat>] {
-        let startSeconds = startHour * 3600
-        let duration = max(1, (endHour - startHour) * 3600)
-        func fraction(_ date: Date) -> CGFloat {
-            let components = calendar.dateComponents([.hour, .minute, .second], from: date)
-            let seconds = (components.hour ?? 0) * 3600
-                + (components.minute ?? 0) * 60
-                + (components.second ?? 0)
-            return min(1, max(0, CGFloat(seconds - startSeconds) / CGFloat(duration)))
-        }
+        let scale = TimelineScale(day: day, startHour: startHour, endHour: endHour, calendar: calendar)
 
         let occupied = tasks
-            .filter { $0.isFlexible != true || $0.startedAt != nil }
-            .map { min(fraction($0.start), fraction($0.end))...max(fraction($0.start), fraction($0.end)) }
+            .filter { ($0.isFlexible != true || $0.startedAt != nil) && scale.overlaps($0) }
+            .map { scale.fraction(for: $0.start)...scale.fraction(for: $0.end) }
             .filter { $0.upperBound > $0.lowerBound }
             .sorted { $0.lowerBound < $1.lowerBound }
 
