@@ -38,6 +38,11 @@ struct L10n {
     var settings: String { ru ? "Настройки" : "Settings" }
     var languageLabel: String { ru ? "Язык" : "Language" }
     var notifications: String { ru ? "Уведомления о задачах" : "Task notifications" }
+    var soundNotifications: String { ru ? "Звуковое уведомление" : "Notification sound" }
+    var chooseSound: String { ru ? "Выбрать свой звук…" : "Choose custom sound…" }
+    var previewSound: String { ru ? "Прослушать" : "Preview" }
+    var systemSound: String { ru ? "Системный звук" : "System sound" }
+    var soundFileError: String { ru ? "Не удалось открыть этот аудиофайл" : "Could not open this audio file" }
     var timelineRange: String { ru ? "Временная шкала" : "Timeline range" }
     var from: String { ru ? "С" : "From" }
     var to: String { ru ? "До" : "To" }

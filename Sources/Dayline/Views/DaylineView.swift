@@ -1,4 +1,6 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct DaylineView: View {
     @EnvironmentObject private var store: TaskStore
@@ -97,15 +99,6 @@ struct DaylineView: View {
                 Text("Dayline")
                     .font(.title2.bold())
                 Spacer()
-                Button { Task { await store.synchronizeNow() } } label: {
-                    if store.isSyncing {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: store.syncError == nil ? "icloud" : "icloud.slash")
-                    }
-                }
-                .buttonStyle(IconBlockButtonStyle())
-                .help(store.syncError ?? "iCloud")
                 Button { showingSettings = true } label: {
                     Image(systemName: "gearshape")
                 }
@@ -277,7 +270,7 @@ private struct TaskRow: View {
         HStack(spacing: 12) {
             RoundedRectangle(cornerRadius: 2)
                 .fill(task.color.swiftUIColor)
-                .frame(width: 4, height: 38)
+                .frame(width: 4, height: 30)
             VStack(alignment: .leading, spacing: 3) {
                 Text(task.title)
                     .fontWeight(.medium)
@@ -332,7 +325,7 @@ private struct TaskRow: View {
             .help(L10n(language: language).delete)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.vertical, 4)
         .background(
             isHighlighted
                 ? task.color.swiftUIColor.opacity(0.16)
@@ -370,6 +363,10 @@ private struct SettingsView: View {
     @Binding var timelineStartHour: Int
     @Binding var timelineEndHour: Int
     @AppStorage("taskNotifications") private var taskNotifications = true
+    @AppStorage(NotificationSoundPreferences.enabledKey) private var soundNotifications = true
+    @AppStorage(NotificationSoundPreferences.nameKey) private var customSoundName = ""
+    @State private var previewSound: NSSound?
+    @State private var soundError: String?
 
     private var l10n: L10n { L10n(language: language) }
 
@@ -389,6 +386,27 @@ private struct SettingsView: View {
             }
             .pickerStyle(.segmented)
             Toggle(l10n.notifications, isOn: $taskNotifications)
+            Toggle(l10n.soundNotifications, isOn: $soundNotifications)
+                .disabled(!taskNotifications)
+            if soundNotifications && taskNotifications {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(customSoundName.isEmpty ? l10n.systemSound : customSoundName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    HStack {
+                        Button(l10n.chooseSound) { chooseSound() }
+                        Button(l10n.previewSound) { playPreview() }
+                        if !customSoundName.isEmpty {
+                            Button(l10n.systemSound) {
+                                NotificationSoundPreferences.useSystemSound()
+                                customSoundName = ""
+                            }
+                        }
+                    }
+                    .controlSize(.small)
+                }
+            }
 
             Divider()
             Text(l10n.timelineRange)
@@ -424,6 +442,41 @@ private struct SettingsView: View {
         }
         .onChange(of: timelineEndHour) { _, value in
             if value <= timelineStartHour { timelineStartHour = max(0, value - 1) }
+        }
+        .alert(l10n.soundFileError, isPresented: soundErrorPresented) {
+            Button(l10n.done) { soundError = nil }
+        } message: {
+            Text(soundError ?? "")
+        }
+    }
+
+    private var soundErrorPresented: Binding<Bool> {
+        Binding(get: { soundError != nil }, set: { if !$0 { soundError = nil } })
+    }
+
+    private func chooseSound() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.audio]
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                try NotificationSoundPreferences.select(url)
+                customSoundName = url.lastPathComponent
+                playPreview()
+            } catch {
+                soundError = error.localizedDescription
+            }
+        }
+    }
+
+    private func playPreview() {
+        previewSound?.stop()
+        previewSound = NotificationSoundPreferences.makeSound()
+        guard previewSound?.play() == true else {
+            soundError = l10n.soundFileError
+            return
         }
     }
 }

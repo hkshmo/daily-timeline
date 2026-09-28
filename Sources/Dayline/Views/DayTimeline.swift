@@ -19,6 +19,11 @@ struct DayTimeline: View {
                         .fill(.quaternary)
                         .frame(height: trackHeight)
 
+                    FreeTimeHatch(ranges: freeTimeRanges)
+                        .frame(width: width, height: trackHeight)
+                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                        .allowsHitTesting(false)
+
                     ForEach(taskPlacements) { placement in
                         let task = placement.task
                         let start = fraction(for: task.start)
@@ -103,6 +108,15 @@ struct DayTimeline: View {
         }
     }
 
+    private var freeTimeRanges: [ClosedRange<CGFloat>] {
+        TimelineFreeTimeCalculator.ranges(
+            tasks: tasks,
+            startHour: startHour,
+            endHour: endHour,
+            calendar: calendar
+        )
+    }
+
     private var laneCount: Int {
         max(1, (taskPlacements.map(\.lane).max() ?? 0) + 1)
     }
@@ -148,6 +162,75 @@ struct DayTimeline: View {
         if highlighted { return 1 }
         if highlightedTaskID != nil { return 0.28 }
         return task.isCompleted ? 0.35 : 0.85
+    }
+}
+
+enum TimelineFreeTimeCalculator {
+    static func ranges(
+        tasks: [DayTask],
+        startHour: Int,
+        endHour: Int,
+        calendar: Calendar = .current
+    ) -> [ClosedRange<CGFloat>] {
+        let startSeconds = startHour * 3600
+        let duration = max(1, (endHour - startHour) * 3600)
+        func fraction(_ date: Date) -> CGFloat {
+            let components = calendar.dateComponents([.hour, .minute, .second], from: date)
+            let seconds = (components.hour ?? 0) * 3600
+                + (components.minute ?? 0) * 60
+                + (components.second ?? 0)
+            return min(1, max(0, CGFloat(seconds - startSeconds) / CGFloat(duration)))
+        }
+
+        let occupied = tasks
+            .filter { $0.isFlexible != true || $0.startedAt != nil }
+            .map { min(fraction($0.start), fraction($0.end))...max(fraction($0.start), fraction($0.end)) }
+            .filter { $0.upperBound > $0.lowerBound }
+            .sorted { $0.lowerBound < $1.lowerBound }
+
+        var merged: [ClosedRange<CGFloat>] = []
+        for range in occupied {
+            if let last = merged.last, range.lowerBound <= last.upperBound {
+                merged[merged.count - 1] = last.lowerBound...max(last.upperBound, range.upperBound)
+            } else {
+                merged.append(range)
+            }
+        }
+
+        var free: [ClosedRange<CGFloat>] = []
+        var cursor: CGFloat = 0
+        for range in merged {
+            if range.lowerBound > cursor { free.append(cursor...range.lowerBound) }
+            cursor = max(cursor, range.upperBound)
+        }
+        if cursor < 1 { free.append(cursor...1) }
+        return free
+    }
+}
+
+private struct FreeTimeHatch: View {
+    let ranges: [ClosedRange<CGFloat>]
+
+    var body: some View {
+        Canvas { context, size in
+            for range in ranges {
+                let rect = CGRect(
+                    x: size.width * range.lowerBound,
+                    y: 0,
+                    width: size.width * (range.upperBound - range.lowerBound),
+                    height: size.height
+                )
+                guard rect.width > 0 else { continue }
+                var clipped = context
+                clipped.clip(to: Path(rect))
+                for x in stride(from: rect.minX - size.height, through: rect.maxX, by: 8) {
+                    var line = Path()
+                    line.move(to: CGPoint(x: x, y: size.height))
+                    line.addLine(to: CGPoint(x: x + size.height, y: 0))
+                    clipped.stroke(line, with: .color(.primary.opacity(0.09)), lineWidth: 0.6)
+                }
+            }
+        }
     }
 }
 

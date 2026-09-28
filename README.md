@@ -28,14 +28,6 @@ Release-сборка универсальна для Intel и Apple Silicon. С�
 xcodebuild -project Dayline.xcodeproj -scheme Dayline -configuration Release -destination 'generic/platform=macOS' build
 ```
 
-## iPhone и синхронизация iCloud
-
-В проекте есть схема **Dayline iOS**. Для iPhone с iOS 27 установите Xcode с поддержкой iOS 27, подключите телефон и включите на нём Developer Mode.
-
-Для CloudKit требуется активное членство Apple Developer Program. В Xcode для targets **Dayline** и **Dayline iOS** откройте `Signing & Capabilities`, выберите свою Team и привяжите контейнер `iCloud.com.hkshmo.dayline`. Затем выберите схему **Dayline iOS**, свой iPhone и нажмите `⌘R`.
-
-Mac и iPhone должны быть авторизованы в одном аккаунте iCloud. Задачи сохраняются локально и синхронизируются через приватную CloudKit-базу; удалённые задачи хранятся как скрытые tombstone-записи, чтобы они не появлялись повторно на другом устройстве.
-
 ## Структура
 
 - `App` — точка входа и управление menu bar

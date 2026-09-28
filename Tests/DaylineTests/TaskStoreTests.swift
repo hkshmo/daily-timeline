@@ -137,36 +137,42 @@ final class TaskStoreTests: XCTestCase {
         XCTAssertEqual(store.tasks.first?.title.count, DayTask.maximumTitleLength)
     }
 
-    func testDeletedTaskBecomesTombstoneAndStaysHidden() {
+    func testNextScheduledEventUsesNearestStartOrEnd() {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("tasks.json")
         let store = TaskStore(fileURL: url)
-        let task = DayTask(title: "Delete", start: Date(), end: Date().addingTimeInterval(3600))
+        let now = Date()
+        store.add(DayTask(title: "Later", start: now.addingTimeInterval(600), end: now.addingTimeInterval(1200)))
+        store.add(DayTask(title: "Soon", start: now.addingTimeInterval(120), end: now.addingTimeInterval(300)))
 
-        store.add(task)
-        store.delete(task)
-
-        XCTAssertTrue(store.tasksForDay(task.start).isEmpty)
-        XCTAssertEqual(store.tasks.first?.isDeleted, true)
-        XCTAssertTrue(TaskStore(fileURL: url).tasksForDay(task.start).isEmpty)
+        XCTAssertEqual(store.nextScheduledEvent(after: now), now.addingTimeInterval(120))
     }
 
-    func testSynchronizationImportsRemoteTasks() async {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("tasks.json")
-        let remote = DayTask(title: "From iPhone", start: Date(), end: Date().addingTimeInterval(3600))
-        let store = TaskStore(fileURL: url, syncService: StubSyncService(tasks: [remote]))
-
-        await store.synchronizeNow()
-
-        XCTAssertEqual(store.tasksForDay(remote.start).map(\.id), [remote.id])
-        XCTAssertNil(store.syncError)
-        XCTAssertNotNil(store.lastSyncedAt)
+    func testFreeTimeRangesForEmptyDay() {
+        XCTAssertEqual(
+            TimelineFreeTimeCalculator.ranges(tasks: [], startHour: 9, endHour: 18),
+            [CGFloat(0)...CGFloat(1)]
+        )
     }
-}
 
-private struct StubSyncService: TaskSyncing {
-    let tasks: [DayTask]
+    func testFreeTimeRangesMergeOverlappingTasksAndClipToScale() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let day = Date(timeIntervalSince1970: 1_704_067_200)
+        func at(_ hour: Int, _ minute: Int = 0) -> Date {
+            calendar.date(bySettingHour: hour, minute: minute, second: 0, of: day)!
+        }
+        let tasks = [
+            DayTask(title: "Before", start: at(8), end: at(10)),
+            DayTask(title: "Overlap", start: at(9, 30), end: at(11)),
+            DayTask(title: "After", start: at(17), end: at(20))
+        ]
 
-    func merge(localTasks _: [DayTask]) async throws -> [DayTask] {
-        tasks
+        let ranges = TimelineFreeTimeCalculator.ranges(
+            tasks: tasks, startHour: 9, endHour: 18, calendar: calendar
+        )
+
+        XCTAssertEqual(ranges.count, 1)
+        XCTAssertEqual(ranges[0].lowerBound, CGFloat(2.0 / 9.0), accuracy: 0.0001)
+        XCTAssertEqual(ranges[0].upperBound, CGFloat(8.0 / 9.0), accuracy: 0.0001)
     }
 }

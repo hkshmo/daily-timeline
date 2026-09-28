@@ -4,18 +4,19 @@ import SwiftUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let store = TaskStore(syncService: CloudKitTaskSyncService())
+    private let store = TaskStore()
     private let popover = NSPopover()
     private let notificationPopover = NSPopover()
     private var statusItem: NSStatusItem?
-    private var notificationTimer: Timer?
+    private var eventTimer: Timer?
     private var taskObserver: AnyCancellable?
     private var outsideClickMonitor: Any?
     private var notifiedTaskStarts: [UUID: Date] = [:]
     private var isClosingPopovers = false
-    private var lastCloudRefresh = Date.distantPast
+    private var notificationSound: NSSound?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        migrateLegacyPreferencesIfNeeded()
         NSApplication.shared.setActivationPolicy(.accessory)
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -35,27 +36,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notificationPopover.behavior = .transient
         statusItem = item
         refreshStatusIcon()
-        Task { await store.synchronizeNow() }
 
         taskObserver = store.$tasks
             .dropFirst()
             .sink { [weak self] _ in
                 Task { @MainActor [weak self] in
                     self?.refreshStatusIcon()
+                    self?.scheduleNextEvent()
                 }
             }
 
-        notificationTimer = Timer.scheduledTimer(
-            timeInterval: 1,
-            target: self,
-            selector: #selector(checkTaskNotifications),
-            userInfo: nil,
-            repeats: true
+        checkTaskNotifications()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationDidResignActive), name: NSApplication.didResignActiveNotification,
+            object: nil
         )
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(applicationDidResignActive),
-            name: NSApplication.didResignActiveNotification,
+            selector: #selector(checkTaskNotifications), name: .NSCalendarDayChanged,
+            object: nil
+        )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(checkTaskNotifications), name: NSWorkspace.didWakeNotification,
             object: nil
         )
         outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(
@@ -82,13 +86,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func checkTaskNotifications() {
         let now = Date()
-        if now.timeIntervalSince(lastCloudRefresh) >= 30 {
-            lastCloudRefresh = now
-            Task { await store.synchronizeNow() }
-        }
         store.completeExpiredTasks(at: now)
         store.startCurrentScheduledTask(at: now)
         refreshStatusIcon()
+        defer { scheduleNextEvent() }
         let defaults = UserDefaults.standard
         let enabled = defaults.object(forKey: "taskNotifications") as? Bool ?? true
         guard enabled, !notificationPopover.isShown, !mainPopoverHasSheet else { return }
@@ -108,6 +109,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .max { $0.end < $1.end }
         notifiedTaskStarts[task.id] = task.start
         showTaskNotification(task, previousTask: previousTask)
+    }
+
+    private func scheduleNextEvent() {
+        eventTimer?.invalidate()
+        eventTimer = nil
+        guard let date = store.nextScheduledEvent(after: Date()) else { return }
+
+        let timer = Timer(
+            fireAt: date.addingTimeInterval(0.05),
+            interval: 0,
+            target: self,
+            selector: #selector(checkTaskNotifications),
+            userInfo: nil,
+            repeats: false
+        )
+        timer.tolerance = 0.25
+        RunLoop.main.add(timer, forMode: .common)
+        eventTimer = timer
+    }
+
+    private func migrateLegacyPreferencesIfNeeded() {
+        let migrationKey = "didMigratePreferencesFromComDaylineApp"
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: migrationKey),
+              let legacy = defaults.persistentDomain(forName: "com.dayline.app") else {
+            defaults.set(true, forKey: migrationKey)
+            return
+        }
+
+        let keys = [
+            "appLanguage", "timelineStartHour", "timelineEndHour", "taskNotifications",
+            NotificationSoundPreferences.enabledKey,
+            NotificationSoundPreferences.bookmarkKey,
+            NotificationSoundPreferences.nameKey
+        ]
+        for key in keys where defaults.object(forKey: key) == nil {
+            defaults.set(legacy[key], forKey: key)
+        }
+        defaults.set(true, forKey: migrationKey)
     }
 
     @objc private func applicationDidResignActive() {
@@ -151,6 +191,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showTaskNotification(_ task: DayTask, previousTask: DayTask?) {
         guard let button = statusItem?.button, !mainPopoverHasSheet else { return }
         if popover.isShown { popover.performClose(nil) }
+
+        let soundEnabled = UserDefaults.standard.object(forKey: NotificationSoundPreferences.enabledKey) as? Bool ?? true
+        if soundEnabled {
+            notificationSound?.stop()
+            notificationSound = NotificationSoundPreferences.makeSound()
+            notificationSound?.play()
+        }
 
         let rawLanguage = UserDefaults.standard.string(forKey: "appLanguage") ?? AppLanguage.russian.rawValue
         let language = AppLanguage(rawValue: rawLanguage) ?? .russian
