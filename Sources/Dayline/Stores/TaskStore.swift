@@ -487,7 +487,8 @@ final class TaskStore: ObservableObject {
                 color: template.color,
                 weekdays: (template.repeatWeekdays ?? Array(1...7)).sorted(),
                 isFlexible: template.isFlexible == true,
-                estimatedDuration: template.estimatedDuration
+                estimatedDuration: template.estimatedDuration,
+                kind: template.kind
             )
             recurringRules.append(rule)
 

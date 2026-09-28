@@ -533,4 +533,30 @@ final class TaskStoreTests: XCTestCase {
             lastBreak.addingTimeInterval(3600)
         )
     }
+
+    func testLegacyMigrationKeepsMealKind() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let url = directory.appendingPathComponent("tasks.json")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let seriesID = UUID()
+        let legacy = (0..<14).map { offset in
+            DayTask(
+                title: "Обед",
+                start: at(13, dayOffset: offset, calendar: calendar),
+                end: at(14, dayOffset: offset, calendar: calendar),
+                seriesID: seriesID,
+                repeatWeekdays: Array(1...7),
+                kind: .lunch
+            )
+        }
+        try JSONEncoder().encode(legacy).write(to: url)
+
+        let store = TaskStore(calendar: calendar, fileURL: url)
+
+        XCTAssertEqual(store.recurringRules.first?.kind, .lunch)
+        XCTAssertEqual(store.tasksForDay(at(12, dayOffset: 3, calendar: calendar)).first?.kind, .lunch)
+        // Правило генерирует тот же тип — отдельные записи на каждый день не нужны.
+        XCTAssertTrue(store.occurrenceOverrides.isEmpty)
+    }
 }
