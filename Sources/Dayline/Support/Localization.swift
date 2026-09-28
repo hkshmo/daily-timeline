@@ -1,10 +1,8 @@
 import Foundation
 
-/// Бренд и имя продукта. Меняется в одном месте.
+/// Имя приложения. Меняется в одном месте (плюс Info.plist и PRODUCT_NAME в проекте).
 enum AppBrand {
-    static let brand = "Moonkite"
-    static let product = "Day"
-    static var fullName: String { "\(brand) \(product)" }
+    static let fullName = "Daystraight"
 }
 
 enum AppLanguage: String, CaseIterable, Identifiable {

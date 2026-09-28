@@ -121,13 +121,8 @@ struct DaylineView: View {
     private var header: some View {
         VStack(spacing: 10) {
             HStack {
-                // Как у Apple: бренд + имя продукта («Apple Music»).
-                HStack(spacing: 5) {
-                    Text(AppBrand.brand)
-                    Text(AppBrand.product)
-                        .foregroundStyle(.secondary)
-                }
-                .font(.title2.bold())
+                Text(AppBrand.fullName)
+                    .font(.title2.bold())
                 Spacer()
                 Button { uiState.showingSettings = true } label: {
                     Image(systemName: "gearshape")

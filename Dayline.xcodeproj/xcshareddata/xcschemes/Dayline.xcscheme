@@ -15,7 +15,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "A50000000000000000000001"
-               BuildableName = "Moonkite Day.app"
+               BuildableName = "Daystraight.app"
                BlueprintName = "Dayline"
                ReferencedContainer = "container:Dayline.xcodeproj">
             </BuildableReference>
@@ -45,7 +45,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "A50000000000000000000001"
-            BuildableName = "Moonkite Day.app"
+            BuildableName = "Daystraight.app"
             BlueprintName = "Dayline"
             ReferencedContainer = "container:Dayline.xcodeproj">
          </BuildableReference>
@@ -62,7 +62,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "A50000000000000000000001"
-            BuildableName = "Moonkite Day.app"
+            BuildableName = "Daystraight.app"
             BlueprintName = "Dayline"
             ReferencedContainer = "container:Dayline.xcodeproj">
          </BuildableReference>
