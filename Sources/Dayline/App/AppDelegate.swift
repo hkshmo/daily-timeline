@@ -22,6 +22,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var screenLockedAt: Date?
     /// Что сейчас показано в окне уведомления.
     private var shownNotification: ShownNotification?
+    /// Задача, уведомление о начале которой отложено, пока в окне открыт редактор.
+    private var pendingTaskNotificationID: UUID?
+    private var pendingNotificationTimer: Timer?
 
     private enum ShownNotification {
         case task
@@ -114,19 +117,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         defer { scheduleNextEvent() }
         let defaults = UserDefaults.standard
         let enabled = defaults.object(forKey: "taskNotifications") as? Bool ?? true
-        // Если висит старое уведомление о задаче, новое его заменит.
-        guard enabled, !mainPopoverHasSheet else { return }
+        guard enabled else { return }
 
         let dayTasks = store.tasksForDay(now)
         let tasks = dayTasks.filter { !$0.isCompleted && $0.isFlexible != true }
         let starting = tasks.first { task in
-            notifiedTaskStarts[task.id] != task.start
+            // Обычно уведомляем в первую минуту задачи. Отложенное (пока был открыт редактор)
+            // показываем позже — но только пока задача ещё идёт.
+            let isOnTime = now.timeIntervalSince(task.start) < 60
+            let isPending = task.id == pendingTaskNotificationID && now < task.end
+            return notifiedTaskStarts[task.id] != task.start
                 && task.start <= now
-                && now.timeIntervalSince(task.start) < 60
+                && (isOnTime || isPending)
                 && task.startedAt.map { $0 >= task.start } == true
         }
 
-        guard let task = starting else { return }
+        guard let task = starting else {
+            pendingTaskNotificationID = nil
+            return
+        }
+        // Открыт редактор задачи или настройки: не закрываем их (там может быть несохранённый ввод),
+        // а откладываем уведомление и проверяем снова через 30 секунд.
+        if mainPopoverHasSheet {
+            pendingTaskNotificationID = task.id
+            pendingNotificationTimer?.invalidate()
+            pendingNotificationTimer = Timer.scheduledTimer(
+                timeInterval: 30,
+                target: self,
+                selector: #selector(checkTaskNotifications),
+                userInfo: nil,
+                repeats: false
+            )
+            return
+        }
+        pendingTaskNotificationID = nil
+        pendingNotificationTimer?.invalidate()
+        pendingNotificationTimer = nil
+        // Если висит старое уведомление о задаче, новое его заменит.
         let previousTask = dayTasks
             .filter { $0.id != task.id && $0.isCompleted && $0.end <= task.start }
             .max { $0.end < $1.end }
@@ -211,6 +238,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         shownNotification = nil
         if notificationPopover.isShown { notificationPopover.performClose(nil) }
+    }
+
+    /// По умолчанию окно живёт на том рабочем столе, где появилось: переключились на другой
+    /// стол — уведомления не видно. Разрешаем ему быть на всех столах и поверх полноэкранных приложений.
+    private func showNotificationOnAllSpaces() {
+        guard let window = notificationPopover.contentViewController?.view.window else { return }
+        window.collectionBehavior.insert([.canJoinAllSpaces, .fullScreenAuxiliary])
     }
 
     private var mainPopoverHasSheet: Bool {
@@ -356,6 +390,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notificationPopover.contentViewController = FirstClickHostingController(rootView: view)
         // Без activate: уведомление появляется, но не отбирает фокус у приложения, в котором вы работаете.
         notificationPopover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        showNotificationOnAllSpaces()
         shownNotification = .warmup
         // Висит, пока не нажмут кнопку, — повторный таймер не нужен.
         warmupTimer?.invalidate()
@@ -403,6 +438,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notificationPopover.contentViewController = FirstClickHostingController(rootView: view)
         // Без activate: уведомление не отбирает фокус у приложения, в котором вы работаете.
         notificationPopover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        showNotificationOnAllSpaces()
         shownNotification = .task
     }
 }
