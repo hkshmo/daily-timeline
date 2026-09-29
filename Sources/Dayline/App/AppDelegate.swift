@@ -37,7 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
-            button.image = DaylineStatusIcon.make(isActive: false, at: Date())
+            button.image = DaylineStatusIcon.make(activeTask: nil)
             button.imagePosition = .imageOnly
             button.toolTip = AppBrand.fullName
             button.target = self
@@ -259,12 +259,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refreshStatusIcon() {
         let now = Date()
-        let active = store.tasksForDay(now).contains {
+        let active = store.tasksForDay(now).first {
             !$0.isCompleted
                 && $0.startedAt != nil
                 && now < $0.end
         }
-        statusItem?.button?.image = DaylineStatusIcon.make(isActive: active, at: now)
+        statusItem?.button?.image = DaylineStatusIcon.make(activeTask: active)
     }
 
     // MARK: - Напоминание размяться
@@ -615,43 +615,23 @@ private struct TaskNotificationView: View {
 }
 
 private enum DaylineStatusIcon {
-    static func make(isActive: Bool, at _: Date) -> NSImage {
+    static func make(activeTask _: DayTask?) -> NSImage {
         let image = NSImage(size: NSSize(width: 20, height: 18), flipped: false) { _ in
             NSColor.labelColor.setStroke()
             NSColor.labelColor.setFill()
 
-            let frame = NSBezierPath(roundedRect: NSRect(x: 2, y: 2, width: 15, height: 14), xRadius: 4.5, yRadius: 4.5)
-            frame.lineWidth = 1.5
-            frame.stroke()
+            let outerCircle = NSBezierPath(ovalIn: NSRect(x: 2.5, y: 1.5, width: 15, height: 15))
+            outerCircle.lineWidth = 1.6
+            outerCircle.stroke()
 
-            let line = NSBezierPath()
-            line.lineWidth = 1.5
-            line.lineCapStyle = .round
-            line.move(to: NSPoint(x: 4.5, y: 9))
-            line.line(to: NSPoint(x: 14.5, y: 9))
-            line.stroke()
-            NSBezierPath(ovalIn: NSRect(x: 8, y: 7.5, width: 3, height: 3)).fill()
+            let innerCircle = NSBezierPath(ovalIn: NSRect(x: 7.6, y: 6.6, width: 4.8, height: 4.8))
+            innerCircle.lineWidth = 1.4
+            innerCircle.stroke()
 
-            if isActive {
-                NSColor.systemBlue.setFill()
-                NSBezierPath(ovalIn: NSRect(x: 11.5, y: -0.5, width: 9, height: 9)).fill()
-
-                NSColor.white.setFill()
-                let letter = NSBezierPath()
-                letter.move(to: NSPoint(x: 14.2, y: 1.4))
-                letter.line(to: NSPoint(x: 14.2, y: 6.6))
-                letter.line(to: NSPoint(x: 15.7, y: 6.6))
-                letter.curve(
-                    to: NSPoint(x: 15.7, y: 1.4),
-                    controlPoint1: NSPoint(x: 19, y: 6.6),
-                    controlPoint2: NSPoint(x: 19, y: 1.4)
-                )
-                letter.close()
-                letter.fill()
-            }
+            NSBezierPath(ovalIn: NSRect(x: 13.4, y: 12.2, width: 3.6, height: 3.6)).fill()
             return true
         }
-        image.isTemplate = !isActive
+        image.isTemplate = true
         image.accessibilityDescription = AppBrand.fullName
         return image
     }

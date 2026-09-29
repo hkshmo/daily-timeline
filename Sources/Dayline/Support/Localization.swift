@@ -2,7 +2,7 @@ import Foundation
 
 /// Имя приложения. Меняется в одном месте (плюс Info.plist и PRODUCT_NAME в проекте).
 enum AppBrand {
-    static let fullName = "Heedmark"
+    static let fullName = "Daily Timeline"
 }
 
 enum AppLanguage: String, CaseIterable, Identifiable {

@@ -29,12 +29,13 @@
 		A20000000000000000000006 /* TaskEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskEditor.swift; sourceTree = "<group>"; };
 		A20000000000000000000007 /* TaskStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskStore.swift; sourceTree = "<group>"; };
 		A20000000000000000000008 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		A20000000000000000000009 /* Heedmark.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Heedmark.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000009 /* Daily Timeline.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Daily Timeline.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000000000000000000010 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		A20000000000000000000011 /* Localization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Localization.swift; sourceTree = "<group>"; };
 		A20000000000000000000012 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A20000000000000000000013 /* DaylineIcon.svg */ = {isa = PBXFileReference; lastKnownFileType = image.svg; path = DaylineIcon.svg; sourceTree = "<group>"; };
 		A20000000000000000000014 /* generate_app_icon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = generate_app_icon.swift; sourceTree = "<group>"; };
+		A20000000000000000000015 /* DaylineIcon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = DaylineIcon.png; sourceTree = "<group>"; };
 		E20000000000000000000001 /* NotificationSound.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationSound.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -83,7 +84,7 @@
 		A40000000000000000000004 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				A20000000000000000000009 /* Heedmark.app */,
+				A20000000000000000000009 /* Daily Timeline.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -138,6 +139,7 @@
 			children = (
 				A20000000000000000000012 /* Assets.xcassets */,
 				A20000000000000000000013 /* DaylineIcon.svg */,
+				A20000000000000000000015 /* DaylineIcon.png */,
 			);
 			path = Resources;
 			sourceTree = SOURCE_ROOT;
@@ -167,7 +169,7 @@
 			);
 			name = Dayline;
 			productName = Dayline;
-			productReference = A20000000000000000000009 /* Heedmark.app */;
+			productReference = A20000000000000000000009 /* Daily Timeline.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -335,7 +337,7 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.hkshmo.dayline;
 				PRODUCT_MODULE_NAME = Dayline;
-				PRODUCT_NAME = Heedmark;
+				PRODUCT_NAME = "Daily Timeline";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 			};
 			name = Debug;
@@ -360,7 +362,7 @@
 				ONLY_ACTIVE_ARCH = NO;
 				PRODUCT_BUNDLE_IDENTIFIER = com.hkshmo.dayline;
 				PRODUCT_MODULE_NAME = Dayline;
-				PRODUCT_NAME = Heedmark;
+				PRODUCT_NAME = "Daily Timeline";
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 			};

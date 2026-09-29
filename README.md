@@ -1,4 +1,4 @@
-# Heedmark
+# Daily Timeline
 
 > Внутреннее имя проекта — Dayline.
 
@@ -22,7 +22,7 @@ swift test
 
 ## Сборка приложения
 
-В Xcode выберите `Product → Archive`, затем `Distribute App → Custom → Copy App`. Полученный `Heedmark.app` можно перенести в папку «Программы».
+В Xcode выберите `Product → Archive`, затем `Distribute App → Custom → Copy App`. Полученный `Daily Timeline.app` можно перенести в папку «Программы».
 
 Release-сборка универсальна для Intel и Apple Silicon. Сборка из терминала:
 
