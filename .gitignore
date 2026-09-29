@@ -6,3 +6,4 @@ dist/
 xcuserdata/
 *.xcuserdatad/
 .DS_Store
+*.zip
