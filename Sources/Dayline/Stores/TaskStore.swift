@@ -56,6 +56,8 @@ final class TaskStore: ObservableObject {
     private static let maximumRecordCount = 50_000
     /// Сколько дней истории повторяющихся задач хранить. Более старые дни не показываются.
     static let historyRetentionDays = 60
+    /// Сколько резервных копий (по одной на запуск) хранить в папке Backups.
+    static let maximumSessionBackups = 20
 
     init(calendar: Calendar = .autoupdatingCurrent, fileURL: URL? = nil) {
         self.calendar = calendar
@@ -182,12 +184,22 @@ final class TaskStore: ObservableObject {
 
     @discardableResult
     func startCurrentScheduledTask(at date: Date) -> DayTask? {
-        guard var task = tasksForDay(date)
+        let today = tasksForDay(date)
+        guard var task = today
             .filter({
                 !$0.isCompleted && $0.isFlexible != true && $0.isAutoStartSuppressed != true
                     && $0.start <= date && date < $0.end
             })
             .max(by: { $0.start < $1.start }), task.startedAt == nil else { return nil }
+
+        // Сейчас идёт другая задача, которую запустили позже начала этой (например, вручную) —
+        // не перебиваем её. Эта продолжится, когда та закончится. А задача, которая по расписанию
+        // начинается уже после запуска текущей, наоборот, сменяет её в своё время.
+        let latestRunningStart = today
+            .filter { $0.id != task.id && $0.startedAt != nil && !$0.isCompleted && date < $0.end }
+            .compactMap(\.startedAt)
+            .max()
+        if let latestRunningStart, task.start <= latestRunningStart { return nil }
 
         stopOtherStartedTasks(except: task.id)
         task.startedAt = date
@@ -384,15 +396,16 @@ final class TaskStore: ObservableObject {
         }) { occurrenceOverrides[index] = value } else { occurrenceOverrides.append(value) }
     }
 
+    /// Останавливает остальные идущие задачи. Флаг «автозапуск отменён» НЕ ставим: задачу прервали
+    /// ради другой, а не отменили. Когда та закончится, прерванная продолжится сама
+    /// (см. условие в startCurrentScheduledTask). Отменой считается только «Отменить начало».
     private func stopOtherStartedTasks(except id: UUID) {
         for index in oneTimeTasks.indices where oneTimeTasks[index].id != id && oneTimeTasks[index].startedAt != nil {
             oneTimeTasks[index].startedAt = nil
-            oneTimeTasks[index].isAutoStartSuppressed = true
         }
         for index in occurrenceOverrides.indices {
             guard var task = occurrenceOverrides[index].task, task.id != id, task.startedAt != nil else { continue }
             task.startedAt = nil
-            task.isAutoStartSuppressed = true
             occurrenceOverrides[index].task = task
         }
     }
@@ -611,6 +624,29 @@ final class TaskStore: ObservableObject {
         try FileManager.default.copyItem(at: fileURL, to: backupURL)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: backupURL.path)
         didCreateSessionBackup = true
+        pruneSessionBackups(in: directory)
+    }
+
+    /// Оставляет только последние `maximumSessionBackups` копий, сделанных при запусках.
+    /// Копии повреждённого файла (tasks-corrupt-…) не трогаем — они нужны для восстановления.
+    /// Ошибки удаления не критичны: в худшем случае лишняя копия останется до следующего раза.
+    private func pruneSessionBackups(in directory: URL) {
+        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else {
+            return
+        }
+        // Имена вида tasks-20260929-061502-123.json: сортировка по имени = сортировка по времени.
+        let backups = files
+            .filter { Self.isSessionBackup($0.lastPathComponent) }
+            .sorted { $0.lastPathComponent > $1.lastPathComponent }
+        for old in backups.dropFirst(Self.maximumSessionBackups) {
+            try? FileManager.default.removeItem(at: old)
+        }
+    }
+
+    static func isSessionBackup(_ name: String) -> Bool {
+        let prefix = "tasks-"
+        guard name.hasPrefix(prefix), name.hasSuffix(".json") else { return false }
+        return name.dropFirst(prefix.count).first?.isNumber == true
     }
 
     @discardableResult

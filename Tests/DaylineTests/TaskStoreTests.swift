@@ -559,4 +559,63 @@ final class TaskStoreTests: XCTestCase {
         // Правило генерирует тот же тип — отдельные записи на каждый день не нужны.
         XCTAssertTrue(store.occurrenceOverrides.isEmpty)
     }
+
+    func testOldSessionBackupsArePrunedButCorruptCopiesKept() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let url = directory.appendingPathComponent("tasks.json")
+        let backups = directory.appendingPathComponent("Backups")
+        let now = Date()
+        // Первый запуск: файла ещё нет, резервная копия не делается.
+        TaskStore(fileURL: url).add(DayTask(title: "A", start: now, end: now.addingTimeInterval(60)))
+
+        try FileManager.default.createDirectory(at: backups, withIntermediateDirectories: true)
+        let extra = 5
+        for index in 0..<(TaskStore.maximumSessionBackups + extra) {
+            let name = String(format: "tasks-20200101-0000%02d-000.json", index)
+            try Data("[]".utf8).write(to: backups.appendingPathComponent(name))
+        }
+        let corrupt = backups.appendingPathComponent("tasks-corrupt-20200101-000000-000.json")
+        try Data("broken".utf8).write(to: corrupt)
+
+        // Следующий запуск: при первом сохранении делается копия и лишние старые удаляются.
+        TaskStore(fileURL: url).add(DayTask(title: "B", start: now, end: now.addingTimeInterval(60)))
+
+        let names = try FileManager.default.contentsOfDirectory(atPath: backups.path)
+        let sessionBackups = names.filter { TaskStore.isSessionBackup($0) }.sorted()
+        XCTAssertEqual(sessionBackups.count, TaskStore.maximumSessionBackups)
+        // Самые старые удалены, свежая копия этого запуска осталась.
+        XCTAssertFalse(sessionBackups.contains("tasks-20200101-000000-000.json"))
+        XCTAssertTrue(sessionBackups.last?.hasPrefix("tasks-2020") == false)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: corrupt.path))
+        XCTAssertFalse(TaskStore.isSessionBackup("tasks-corrupt-20200101-000000-000.json"))
+    }
+
+    func testInterruptedTaskIsNotSuppressedAndResumesAfterOtherTask() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent("tasks.json")
+        let store = TaskStore(fileURL: url)
+        let now = Date()
+        let scheduled = DayTask(title: "Scheduled", start: now.addingTimeInterval(-600), end: now.addingTimeInterval(3000))
+        let manual = DayTask(
+            title: "Manual", start: now, end: now.addingTimeInterval(600),
+            isFlexible: true, estimatedDuration: 600
+        )
+        store.add(scheduled)
+        store.add(manual)
+        XCTAssertEqual(store.startCurrentScheduledTask(at: now)?.id, scheduled.id)
+
+        // Вручную запускаем другую задачу: запланированная останавливается, но не «отменяется».
+        store.toggleStart(manual)
+        let interrupted = try XCTUnwrap(store.tasks.first { $0.id == scheduled.id })
+        XCTAssertNil(interrupted.startedAt)
+        XCTAssertNotEqual(interrupted.isAutoStartSuppressed, true)
+
+        // Пока идёт ручная задача, запланированная её не перебивает.
+        XCTAssertNil(store.startCurrentScheduledTask(at: Date()))
+
+        // Ручная закончилась — запланированная продолжается сама.
+        store.complete(try XCTUnwrap(store.tasks.first { $0.id == manual.id }))
+        XCTAssertEqual(store.startCurrentScheduledTask(at: Date())?.id, scheduled.id)
+    }
 }

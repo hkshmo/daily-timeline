@@ -59,12 +59,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .dropFirst()
             .sink { [weak self] _ in
                 Task { @MainActor [weak self] in
-                    self?.refreshStatusIcon()
-                    self?.scheduleNextEvent()
+                    // Задачу добавили или изменили так, что она идёт прямо сейчас, — запускаем сразу,
+                    // а не ждём следующего события. Отменённые вручную (isAutoStartSuppressed) не трогаются.
+                    self?.runTaskChecks(catchUp: false)
                 }
             }
 
-        checkTaskNotifications()
+        // При запуске задача может уже идти — показываем уведомление о ней, даже если прошло больше минуты.
+        runTaskChecks(catchUp: true)
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(applicationDidResignActive), name: NSApplication.didResignActiveNotification,
@@ -83,7 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
-            selector: #selector(checkTaskNotifications), name: NSWorkspace.didWakeNotification,
+            selector: #selector(handleWake), name: NSWorkspace.didWakeNotification,
             object: nil
         )
         setUpWarmupReminders()
@@ -110,6 +112,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func checkTaskNotifications() {
+        runTaskChecks(catchUp: false)
+    }
+
+    /// После сна задача могла начаться, пока Mac спал, — о ней тоже стоит напомнить.
+    @objc private func handleWake() {
+        runTaskChecks(catchUp: true)
+    }
+
+    /// - Parameter catchUp: при запуске приложения и после сна уведомляем и о задаче,
+    ///   которая уже идёт дольше минуты (если о ней ещё не уведомляли).
+    private func runTaskChecks(catchUp: Bool) {
         let now = Date()
         store.completeExpiredTasks(at: now)
         store.startCurrentScheduledTask(at: now)
@@ -126,9 +139,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // показываем позже — но только пока задача ещё идёт.
             let isOnTime = now.timeIntervalSince(task.start) < 60
             let isPending = task.id == pendingTaskNotificationID && now < task.end
+            let isCatchUp = catchUp && now < task.end
             return notifiedTaskStarts[task.id] != task.start
                 && task.start <= now
-                && (isOnTime || isPending)
+                && (isOnTime || isPending || isCatchUp)
                 && task.startedAt.map { $0 >= task.start } == true
         }
 
@@ -615,7 +629,9 @@ private struct TaskNotificationView: View {
 }
 
 private enum DaylineStatusIcon {
-    static func make(activeTask _: DayTask?) -> NSImage {
+    static func make(activeTask: DayTask?) -> NSImage {
+        let isActive = activeTask != nil
+        let meal = activeTask?.kind
         let image = NSImage(size: NSSize(width: 20, height: 18), flipped: false) { _ in
             NSColor.labelColor.setStroke()
             NSColor.labelColor.setFill()
@@ -624,16 +640,50 @@ private enum DaylineStatusIcon {
             outerCircle.lineWidth = 1.6
             outerCircle.stroke()
 
-            let innerCircle = NSBezierPath(ovalIn: NSRect(x: 7.6, y: 6.6, width: 4.8, height: 4.8))
-            innerCircle.lineWidth = 1.4
-            innerCircle.stroke()
-
             NSBezierPath(ovalIn: NSRect(x: 13.4, y: 12.2, width: 3.6, height: 3.6)).fill()
+
+            if isActive {
+                // Идёт задача: вместо внутреннего круга — зелёный «play», как у активной задачи в списке.
+                // Для завтрака/обеда/ужина внутри вместо треугольника их иконка.
+                NSColor.systemGreen.setFill()
+                NSBezierPath(ovalIn: NSRect(x: 5.8, y: 4.8, width: 8.4, height: 8.4)).fill()
+
+                if let meal, let symbol = mealSymbol(meal) {
+                    let size = symbol.size
+                    symbol.draw(in: NSRect(
+                        x: 10 - size.width / 2,
+                        y: 9 - size.height / 2,
+                        width: size.width,
+                        height: size.height
+                    ))
+                } else {
+                    NSColor.white.setFill()
+                    let play = NSBezierPath()
+                    play.move(to: NSPoint(x: 8.9, y: 6.9))
+                    play.line(to: NSPoint(x: 8.9, y: 11.1))
+                    play.line(to: NSPoint(x: 12.6, y: 9))
+                    play.close()
+                    play.fill()
+                }
+            } else {
+                let innerCircle = NSBezierPath(ovalIn: NSRect(x: 7.6, y: 6.6, width: 4.8, height: 4.8))
+                innerCircle.lineWidth = 1.4
+                innerCircle.stroke()
+            }
             return true
         }
-        image.isTemplate = true
+        // Без задачи иконка одноцветная и подстраивается под строку меню; с задачей — с зелёным акцентом.
+        image.isTemplate = !isActive
         image.accessibilityDescription = AppBrand.fullName
         return image
+    }
+
+    /// Белая SF-иконка приёма пищи под размер зелёного кружка.
+    private static func mealSymbol(_ kind: TaskKind) -> NSImage? {
+        let configuration = NSImage.SymbolConfiguration(pointSize: 5, weight: .bold)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [.white]))
+        return NSImage(systemSymbolName: kind.systemImage, accessibilityDescription: nil)?
+            .withSymbolConfiguration(configuration)
     }
 
     // Первый вариант сохранён: линия с вертикальным маркером.
