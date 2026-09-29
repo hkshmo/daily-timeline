@@ -3,7 +3,9 @@
 Планировщик дня в строке меню macOS: весь день на одной временной шкале, задачи по расписанию и напоминания, чтобы не пропустить важное.
 
 <p align="center">
-  <img src="docs/screenshots/main.png" alt="Daily Timeline: шкала дня и список задач" width="560">
+  <img src="docs/screenshots/main.png" alt="Daily Timeline: шкала дня и список задач" width="420">
+  &nbsp;
+  <img src="docs/screenshots/settings.png" alt="Daily Timeline: настройки уведомлений, разминки и шкалы" width="420">
 </p>
 
 ## Возможности
